@@ -10,13 +10,10 @@ from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
     Hashable,
     Iterator,
-    List,
     Optional,
-    Tuple,
     TypeVar,
     cast,
 )
@@ -37,21 +34,21 @@ class _HeuristicSearchNode(Generic[_S, _A]):
 def _run_heuristic_search(
     initial_state: _S,
     check_goal: Callable[[_S], bool],
-    get_successors: Callable[[_S], Iterator[Tuple[_A, _S, float]]],
+    get_successors: Callable[[_S], Iterator[tuple[_A, _S, float]]],
     get_priority: Callable[[_HeuristicSearchNode[_S, _A]], Any],
     max_expansions: int = 10000000,
     max_evals: int = 10000000,
     timeout: float = 10000000,
     lazy_expansion: bool = False,
-) -> Tuple[List[_S], List[_A]]:
+) -> tuple[list[_S], list[_A]]:
     """A generic heuristic search implementation.
 
     Depending on get_priority, can implement A*, GBFS, or UCS.
 
     If no goal is found, returns the state with the best priority.
     """
-    queue: List[Tuple[Any, int, _HeuristicSearchNode[_S, _A]]] = []
-    state_to_best_path_cost: Dict[_S, float] = defaultdict(lambda: float("inf"))
+    queue: list[tuple[Any, int, _HeuristicSearchNode[_S, _A]]] = []
+    state_to_best_path_cost: dict[_S, float] = defaultdict(lambda: float("inf"))
 
     root_node: _HeuristicSearchNode[_S, _A] = _HeuristicSearchNode(initial_state, 0, 0)
     root_priority = get_priority(root_node)
@@ -113,10 +110,10 @@ def _run_heuristic_search(
     return _finish_plan(best_node)
 
 
-def _finish_plan(node: _HeuristicSearchNode[_S, _A]) -> Tuple[List[_S], List[_A]]:
+def _finish_plan(node: _HeuristicSearchNode[_S, _A]) -> tuple[list[_S], list[_A]]:
     """Helper for _run_heuristic_search and run_hill_climbing."""
-    rev_state_sequence: List[_S] = []
-    rev_action_sequence: List[_A] = []
+    rev_state_sequence: list[_S] = []
+    rev_action_sequence: list[_A] = []
 
     while node.parent is not None:
         action = cast(_A, node.action)
@@ -131,13 +128,13 @@ def _finish_plan(node: _HeuristicSearchNode[_S, _A]) -> Tuple[List[_S], List[_A]
 def run_gbfs(
     initial_state: _S,
     check_goal: Callable[[_S], bool],
-    get_successors: Callable[[_S], Iterator[Tuple[_A, _S, float]]],
+    get_successors: Callable[[_S], Iterator[tuple[_A, _S, float]]],
     heuristic: Callable[[_S], float],
     max_expansions: int = 10000000,
     max_evals: int = 10000000,
     timeout: float = 10000000,
     lazy_expansion: bool = False,
-) -> Tuple[List[_S], List[_A]]:
+) -> tuple[list[_S], list[_A]]:
     """Greedy best-first search."""
     get_priority = lambda n: heuristic(n.state)
     return _run_heuristic_search(
@@ -155,13 +152,13 @@ def run_gbfs(
 def run_astar(
     initial_state: _S,
     check_goal: Callable[[_S], bool],
-    get_successors: Callable[[_S], Iterator[Tuple[_A, _S, float]]],
+    get_successors: Callable[[_S], Iterator[tuple[_A, _S, float]]],
     heuristic: Callable[[_S], float],
     max_expansions: int = 10000000,
     max_evals: int = 10000000,
     timeout: float = 10000000,
     lazy_expansion: bool = False,
-) -> Tuple[List[_S], List[_A]]:
+) -> tuple[list[_S], list[_A]]:
     """A* search."""
     get_priority = lambda n: heuristic(n.state) + n.cumulative_cost
     return _run_heuristic_search(
@@ -179,12 +176,12 @@ def run_astar(
 def run_hill_climbing(
     initial_state: _S,
     check_goal: Callable[[_S], bool],
-    get_successors: Callable[[_S], Iterator[Tuple[_A, _S, float]]],
+    get_successors: Callable[[_S], Iterator[tuple[_A, _S, float]]],
     heuristic: Callable[[_S], float],
     early_termination_heuristic_thresh: Optional[float] = None,
     enforced_depth: int = 0,
     timeout: float = float("inf"),
-) -> Tuple[List[_S], List[_A], List[float]]:
+) -> tuple[list[_S], list[_A], list[float]]:
     """Enforced hill climbing local search.
 
     For each node, the best child node is always selected, if that child
@@ -261,7 +258,7 @@ def run_hill_climbing(
 def run_policy_guided_astar(
     initial_state: _S,
     check_goal: Callable[[_S], bool],
-    get_valid_actions: Callable[[_S], Iterator[Tuple[_A, float]]],
+    get_valid_actions: Callable[[_S], Iterator[tuple[_A, float]]],
     get_next_state: Callable[[_S, _A], _S],
     heuristic: Callable[[_S], float],
     policy: Callable[[_S], Optional[_A]],
@@ -271,7 +268,7 @@ def run_policy_guided_astar(
     max_evals: int = 10000000,
     timeout: float = 10000000,
     lazy_expansion: bool = False,
-) -> Tuple[List[_S], List[_A]]:
+) -> tuple[list[_S], list[_A]]:
     """Perform A* search, but at each node, roll out a given policy for a given
     number of timesteps, creating new successors at each step.
 
@@ -291,7 +288,7 @@ def run_policy_guided_astar(
     # Create a new successor function that rolls out the policy first.
     # A successor here means: from this state, if you take this sequence of
     # actions in order, you'll end up at this final state.
-    def get_successors(state: _S) -> Iterator[Tuple[List[_A], _S, float]]:
+    def get_successors(state: _S) -> Iterator[tuple[list[_A], _S, float]]:
         # Get policy-based successors.
         policy_state = state
         policy_action_seq = []

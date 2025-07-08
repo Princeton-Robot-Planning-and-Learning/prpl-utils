@@ -6,7 +6,7 @@ import textwrap
 from dataclasses import fields
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Collection, Tuple
+from typing import Any, Collection
 
 import graphviz
 import matplotlib.pyplot as plt
@@ -80,7 +80,7 @@ def get_signed_angle_distance(target: float, source: float) -> float:
     return (a + np.pi) % (2 * np.pi) - np.pi
 
 
-def draw_dag(edges: Collection[Tuple[str, str]], outfile: Path) -> None:
+def draw_dag(edges: Collection[tuple[str, str]], outfile: Path) -> None:
     """Draw a DAG using graphviz."""
     if not outfile.parent.exists():
         os.makedirs(outfile.parent)

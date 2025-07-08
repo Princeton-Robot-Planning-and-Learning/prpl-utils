@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Generic, Iterable, List, Optional, TypeVar
+from typing import Callable, Generic, Iterable, Optional, TypeVar
 
 import numpy as np
 
@@ -35,7 +35,7 @@ class RRT(Generic[_RRTState]):
 
     def query(
         self, pt1: _RRTState, pt2: _RRTState, sample_goal_eps: float = 0.0
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         """Query the RRT, to get a collision-free path from pt1 to pt2.
 
         If none is found, returns None.
@@ -59,7 +59,7 @@ class RRT(Generic[_RRTState]):
         goal_fn: Callable[[_RRTState], bool],
         goal_sampler: Callable[[], _RRTState] | None = None,
         sample_goal_eps: float = 0.0,
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         """Query the RRT, to get a collision-free path from start to a point
         such that goal_fn(point) is True. Uses goal_sampler to sample a target
         for a direct path or with probability sample_goal_eps.
@@ -83,7 +83,7 @@ class RRT(Generic[_RRTState]):
 
     def try_direct_path(
         self, pt1: _RRTState, pt2: _RRTState
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         """Attempt to plan a direct path from pt1 to pt2, returning None if
         collision-free path can be found."""
         path = [pt1]
@@ -99,7 +99,7 @@ class RRT(Generic[_RRTState]):
         goal_sampler: Callable[[], _RRTState] | None = None,
         goal_fn: Callable[[_RRTState], bool] | None = None,
         sample_goal_eps: float = 0.0,
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         root = _RRTNode(pt1)
         nodes = [root]
 
@@ -131,7 +131,7 @@ class RRT(Generic[_RRTState]):
     def _get_pt_dist_to_node(self, pt: _RRTState, node: _RRTNode[_RRTState]) -> float:
         return self._distance_fn(pt, node.data)
 
-    def _smooth_path(self, path: List[_RRTState]) -> List[_RRTState]:
+    def _smooth_path(self, path: list[_RRTState]) -> list[_RRTState]:
         assert len(path) > 2
         for _ in range(self._smooth_amt):
             i = self._rng.integers(0, len(path) - 1)
@@ -157,7 +157,7 @@ class BiRRT(RRT[_RRTState]):
         goal_fn: Callable[[_RRTState], bool],
         goal_sampler: Callable[[], _RRTState] | None = None,
         sample_goal_eps: float = 0.0,
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         raise NotImplementedError("Can't query to goal function using BiRRT")
 
     def _rrt_connect(
@@ -166,7 +166,7 @@ class BiRRT(RRT[_RRTState]):
         goal_sampler: Callable[[], _RRTState] | None = None,
         goal_fn: Callable[[_RRTState], bool] | None = None,
         sample_goal_eps: float = 0.0,
-    ) -> Optional[List[_RRTState]]:
+    ) -> Optional[list[_RRTState]]:
         # goal_fn and sample_goal_eps are unused
         assert goal_sampler is not None
         pt2 = goal_sampler()
@@ -212,7 +212,7 @@ class _RRTNode(Generic[_RRTState]):
         self.data = data
         self.parent = parent
 
-    def path_from_root(self) -> List[_RRTNode[_RRTState]]:
+    def path_from_root(self) -> list[_RRTNode[_RRTState]]:
         """Return the path from the root to this node."""
         sequence = []
         node: Optional[_RRTNode[_RRTState]] = self
