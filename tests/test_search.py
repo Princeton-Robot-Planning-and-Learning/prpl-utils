@@ -1,6 +1,6 @@
 """Tests for search.py."""
 
-from typing import Iterator, Tuple, TypeAlias
+from typing import Iterator, TypeAlias
 
 import numpy as np
 import pytest
@@ -10,10 +10,10 @@ from prpl_utils import search
 
 def test_run_gbfs() -> None:
     """Tests for run_gbfs()."""
-    S: TypeAlias = Tuple[int, int]  # grid (row, col)
+    S: TypeAlias = tuple[int, int]  # grid (row, col)
     A: TypeAlias = str  # up, down, left, right
 
-    def _grid_successor_fn(state: S) -> Iterator[Tuple[A, S, float]]:
+    def _grid_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
         arrival_costs = np.array(
             [
                 [1, 1, 8, 1, 1],
@@ -107,7 +107,7 @@ def test_run_gbfs() -> None:
     ]
 
     # Test with an infinite branching factor.
-    def _inf_grid_successor_fn(state: S) -> Iterator[Tuple[A, S, float]]:
+    def _inf_grid_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
         # Change all costs to 1.
         i = 0
         for a, ns, _ in _grid_successor_fn(state):
@@ -173,10 +173,10 @@ def test_run_gbfs() -> None:
 
 def test_run_astar() -> None:
     """Tests for run_astar()."""
-    S: TypeAlias = Tuple[int, int]  # grid (row, col)
+    S: TypeAlias = tuple[int, int]  # grid (row, col)
     A: TypeAlias = str  # up, down, left, right
 
-    def _grid_successor_fn(state: S) -> Iterator[Tuple[A, S, float]]:
+    def _grid_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
         arrival_costs = np.array(
             [
                 [1, 1, 100, 1, 1],
@@ -250,10 +250,10 @@ def test_run_astar() -> None:
 
 def test_run_hill_climbing() -> None:
     """Tests for run_hill_climbing()."""
-    S: TypeAlias = Tuple[int, int]  # grid (row, col)
+    S: TypeAlias = tuple[int, int]  # grid (row, col)
     A: TypeAlias = str  # up, down, left, right
 
-    def _grid_successor_fn(state: S) -> Iterator[Tuple[A, S, float]]:
+    def _grid_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
         arrival_costs = np.array(
             [
                 [1, 1, 8, 1, 1],
@@ -348,7 +348,7 @@ def test_run_hill_climbing() -> None:
     ]
 
     # Search with no successors
-    def _no_successor_fn(state: S) -> Iterator[Tuple[A, S, float]]:
+    def _no_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
         if state == initial_state:
             yield "dummy_action", (2, 2), 1.0
 
@@ -433,7 +433,7 @@ def test_run_hill_climbing() -> None:
 
 def test_run_policy_guided_astar() -> None:
     """Tests for run_policy_guided_astar()."""
-    S: TypeAlias = Tuple[int, int]  # grid (row, col)
+    S: TypeAlias = tuple[int, int]  # grid (row, col)
     A: TypeAlias = str  # up, down, left, right
 
     arrival_costs = np.array(
@@ -454,7 +454,7 @@ def test_run_policy_guided_astar() -> None:
         "right": (0, 1),
     }
 
-    def _get_valid_actions(state: S) -> Iterator[Tuple[A, float]]:
+    def _get_valid_actions(state: S) -> Iterator[tuple[A, float]]:
         r, c = state
         for act in sorted(act_to_delta):
             dr, dc = act_to_delta[act]

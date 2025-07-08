@@ -5,14 +5,14 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import List, Optional
+from typing import Optional
 
 from pyperplan.planner import HEURISTICS, SEARCHES, search_plan
 
 
 def run_pddl_planner(
     domain_str: str, problem_str: str, planner: str = "fd-sat"
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     """Run a PDDL planner and return a list of ground operators, or None if no
     plan is found."""
     if planner == "fd-sat":
@@ -29,7 +29,7 @@ def run_pyperplan_planning(
     problem_str: str,
     heuristic: str = "hff",
     search: str = "gbf",
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     """Find a plan with pyperplan."""
     search_fn = SEARCHES[search]
     heuristic_fn = HEURISTICS[heuristic]
@@ -60,7 +60,7 @@ def run_fastdownward_planning(
     problem_str: str,
     alias: Optional[str] = "lama-first",
     search: Optional[str] = None,
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     """Find a plan with fast downward.
 
     Usage: Build and compile the Fast Downward planner, then set the environment
