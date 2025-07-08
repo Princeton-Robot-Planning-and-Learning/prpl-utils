@@ -5,12 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prpl_utils"
 version = "0.1.0"
-description = "A basic starter for Python packages."
+description = "Common Python utilities for the Princeton Robot Planning and Learning lab."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
    "matplotlib",
    "numpy",
+   "graphviz",
+   "pyperplan",
+   "gymnasium",
 ]
 
 [project.optional-dependencies]
@@ -50,5 +53,7 @@ exclude = ["venv/*", ".venv/*"]
 [[tool.mypy.overrides]]
 module = [
     "matplotlib.*",
+    "pyperplan.*",
+    "graphviz.*",
 ]
 ignore_missing_imports = true
