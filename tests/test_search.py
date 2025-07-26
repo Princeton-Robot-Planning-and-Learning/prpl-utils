@@ -81,30 +81,10 @@ def test_run_gbfs() -> None:
     ]
 
     # Same, but actually reaching the goal is impossible.
-    state_sequence, action_sequence = search.run_gbfs(
-        initial_state, lambda s: False, _grid_successor_fn, _grid_heuristic_fn
-    )
-    assert state_sequence == [
-        (0, 0),
-        (1, 0),
-        (2, 0),
-        (3, 0),
-        (4, 0),
-        (4, 1),
-        (4, 2),
-        (4, 3),
-        (4, 4),
-    ]
-    assert action_sequence == [
-        "down",
-        "down",
-        "down",
-        "down",
-        "right",
-        "right",
-        "right",
-        "right",
-    ]
+    with pytest.raises(StopIteration):
+        search.run_gbfs(
+            initial_state, lambda s: False, _grid_successor_fn, _grid_heuristic_fn
+        )
 
     # Test with an infinite branching factor.
     def _inf_grid_successor_fn(state: S) -> Iterator[tuple[A, S, float]]:
@@ -148,27 +128,27 @@ def test_run_gbfs() -> None:
         "right",
     ]
     # Test limit on max evals.
-    state_sequence, action_sequence = search.run_gbfs(
-        initial_state,
-        _grid_check_goal_fn,
-        _inf_grid_successor_fn,
-        _grid_heuristic_fn,
-        max_evals=2,
-    )  # note: need lazy_expansion to be False here
-    assert state_sequence == [(0, 0), (1, 0)]
-    assert action_sequence == ["down"]
+    with pytest.raises(StopIteration):
+        search.run_gbfs(
+            initial_state,
+            _grid_check_goal_fn,
+            _inf_grid_successor_fn,
+            _grid_heuristic_fn,
+            max_evals=2,
+        )  # note: need lazy_expansion to be False here
 
     # Test timeout.
     # We don't care about the return value. Since the goal check always
     # returns False, the fact that this test doesn't hang means that
     # the timeout is working correctly.
-    search.run_gbfs(
-        initial_state,
-        lambda s: False,
-        _inf_grid_successor_fn,
-        _grid_heuristic_fn,
-        timeout=0.01,
-    )
+    with pytest.raises(StopIteration):
+        search.run_gbfs(
+            initial_state,
+            lambda s: False,
+            _inf_grid_successor_fn,
+            _grid_heuristic_fn,
+            timeout=0.01,
+        )
 
 
 def test_run_astar() -> None:

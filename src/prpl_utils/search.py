@@ -40,8 +40,10 @@ def _run_heuristic_search(
     max_evals: int = 10000000,
     timeout: float = 10000000,
     lazy_expansion: bool = False,
-) -> tuple[list[_S], list[_A]]:
+) -> Iterator[tuple[list[_S], list[_A]]]:
     """A generic heuristic search implementation.
+
+    Returns an iterator over plans.
 
     Depending on get_priority, can implement A*, GBFS, or UCS.
 
@@ -52,7 +54,6 @@ def _run_heuristic_search(
 
     root_node: _HeuristicSearchNode[_S, _A] = _HeuristicSearchNode(initial_state, 0, 0)
     root_priority = get_priority(root_node)
-    best_node = root_node
     best_node_priority = root_priority
     tiebreak = itertools.count()
     hq.heappush(queue, (root_priority, next(tiebreak), root_node))
@@ -72,7 +73,7 @@ def _run_heuristic_search(
             continue
         # If the goal holds, return.
         if check_goal(node.state):
-            return _finish_plan(node)
+            yield _finish_plan(node)
         num_expansions += 1
         # Generate successors.
         for action, child_state, cost in get_successors(node.state):
@@ -96,7 +97,6 @@ def _run_heuristic_search(
             state_to_best_path_cost[child_state] = child_path_cost
             if priority < best_node_priority:
                 best_node_priority = priority
-                best_node = child_node
                 # Optimization: if we've found a better child, immediately
                 # explore the child without expanding the rest of the children.
                 # Accomplish this by putting the parent node back on the queue.
@@ -105,9 +105,6 @@ def _run_heuristic_search(
                     break
             if num_evals >= max_evals:
                 break
-
-    # Did not find path to goal; return best path seen.
-    return _finish_plan(best_node)
 
 
 def _finish_plan(node: _HeuristicSearchNode[_S, _A]) -> tuple[list[_S], list[_A]]:
@@ -137,7 +134,33 @@ def run_gbfs(
 ) -> tuple[list[_S], list[_A]]:
     """Greedy best-first search."""
     get_priority = lambda n: heuristic(n.state)
-    return _run_heuristic_search(
+    return next(
+        _run_heuristic_search(
+            initial_state,
+            check_goal,
+            get_successors,
+            get_priority,
+            max_expansions,
+            max_evals,
+            timeout,
+            lazy_expansion,
+        )
+    )
+
+
+def run_iter_gbfs(
+    initial_state: _S,
+    check_goal: Callable[[_S], bool],
+    get_successors: Callable[[_S], Iterator[tuple[_A, _S, float]]],
+    heuristic: Callable[[_S], float],
+    max_expansions: int = 10000000,
+    max_evals: int = 10000000,
+    timeout: float = 10000000,
+    lazy_expansion: bool = False,
+) -> Iterator[tuple[list[_S], list[_A]]]:
+    """Greedy best-first search, but iterate all plans found."""
+    get_priority = lambda n: heuristic(n.state)
+    yield from _run_heuristic_search(
         initial_state,
         check_goal,
         get_successors,
@@ -161,15 +184,17 @@ def run_astar(
 ) -> tuple[list[_S], list[_A]]:
     """A* search."""
     get_priority = lambda n: heuristic(n.state) + n.cumulative_cost
-    return _run_heuristic_search(
-        initial_state,
-        check_goal,
-        get_successors,
-        get_priority,
-        max_expansions,
-        max_evals,
-        timeout,
-        lazy_expansion,
+    return next(
+        _run_heuristic_search(
+            initial_state,
+            check_goal,
+            get_successors,
+            get_priority,
+            max_expansions,
+            max_evals,
+            timeout,
+            lazy_expansion,
+        )
     )
 
 
