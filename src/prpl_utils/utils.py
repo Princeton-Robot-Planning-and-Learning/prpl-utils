@@ -3,10 +3,12 @@
 import hashlib
 import os
 import textwrap
+import time
+from contextlib import contextmanager
 from dataclasses import fields
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Collection
+from typing import Any, Collection, Generator
 
 import graphviz
 import matplotlib.pyplot as plt
@@ -176,3 +178,16 @@ def create_rng_from_rng(rng: np.random.Generator) -> np.random.Generator:
     """
     seed = sample_seed_from_rng(rng)
     return np.random.default_rng(seed)
+
+
+@contextmanager
+def timer() -> Generator[dict[str, float], None, None]:
+    """A context manager that logs the time taken to execute the block of code.
+
+    Hat tip to Rohan Banerjee.
+    """
+    result: dict[str, float] = {}
+    start_time = time.perf_counter()
+    yield result
+    end_time = time.perf_counter()
+    result["time"] = end_time - start_time
