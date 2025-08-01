@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from prpl_utils.utils import (
     _DISABLED_cached_property_until_field_change,
     draw_dag,
     get_signed_angle_distance,
+    timer,
     wrap_angle,
 )
 
@@ -86,3 +88,10 @@ def test_draw_dag():
     draw_dag(edges, filepath)
     assert filepath.exists()
     os.remove(filepath)
+
+
+def test_timer():
+    """Tests for the timer contextmanager."""
+    with timer() as result:
+        time.sleep(0.1)
+    assert result["time"] > 0.1
