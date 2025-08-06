@@ -10,6 +10,7 @@ import numpy as np
 
 from prpl_utils.utils import (
     _DISABLED_cached_property_until_field_change,
+    consistent_hash,
     draw_dag,
     get_signed_angle_distance,
     timer,
@@ -95,3 +96,26 @@ def test_timer():
     with timer() as result:
         time.sleep(0.1)
     assert result["time"] > 0.1
+
+
+def test_consistent_hash():
+    """Tests for consistent_hash()."""
+    # Tests for numpy arrays.
+    arr1 = np.array([1, 2, 3], dtype=np.float64)
+    arr2 = np.array([1, 2, 3], dtype=np.float32)
+    assert consistent_hash(arr1) != consistent_hash(arr2)
+    arr3 = np.array([1, 2, 3], dtype=np.float32)
+    assert consistent_hash(arr2) == consistent_hash(arr3)
+    arr4 = np.zeros(10000)
+    arr4[5000] = 1
+    arr5 = np.zeros(10000)
+    assert repr(arr4) == repr(arr5)
+    assert consistent_hash(arr4) != consistent_hash(arr5)
+    # Tests for other common objects.
+    assert consistent_hash(1) == consistent_hash(1)
+    assert consistent_hash(1) != consistent_hash(1.0)
+    assert consistent_hash({"hello": "world"}) == consistent_hash({"hello": "world"})
+    assert consistent_hash(["hello", "world", 5]) == consistent_hash(
+        ["hello", "world", 5]
+    )
+    assert consistent_hash([5]) != consistent_hash([5.0])

@@ -100,9 +100,23 @@ def draw_dag(edges: Collection[tuple[str, str]], outfile: Path) -> None:
 
 
 def consistent_hash(obj: Any) -> int:
-    """A hash function that is consistent between sessions, unlike hash()."""
-    obj_str = repr(obj)
-    obj_bytes = obj_str.encode("utf-8")
+    """A hash function that is consistent between sessions, unlike hash().
+
+    This function assumes that `repr(obj)` is a precise and unambiguous representation
+    of `obj`. In practice, this may not be true for some objects. For example, numpy
+    arrays can be ambiguous, so we handle them as a special case within this function,
+    since they are common in our code.
+    """
+    # See note in docstring.
+    if isinstance(obj, np.ndarray):
+        obj_bytes = (
+            obj.tobytes()
+            + str(obj.shape).encode("utf-8")
+            + str(obj.dtype).encode("utf-8")
+        )
+    else:
+        obj_str = repr(obj)
+        obj_bytes = obj_str.encode("utf-8")
     hash_hex = hashlib.sha256(obj_bytes).hexdigest()
     hash_int = int(hash_hex, 16)
     # Mimic Python's built-in hash() behavior by returning a 64-bit signed int.
