@@ -40,7 +40,8 @@ class MultiEnvWrapper(VectorEnv):
     """
 
     def __init__(
-        self, env_fn: Callable[[], gym.Env], num_envs: int, auto_reset: bool = True
+        self, env_fn: Callable[[], gym.Env], num_envs: int, auto_reset: bool = True,
+        to_tensor: bool = False, device: str = "cpu"
     ):
         self.env_fn = env_fn
         self.auto_reset = auto_reset
@@ -212,18 +213,58 @@ class MultiEnvWrapper(VectorEnv):
             infos,
         )
 
-    def render(self) -> tuple[np.ndarray, ...] | None:  # type: ignore
-        """Render all environments.
+    def render(self) -> np.ndarray | None:  # type: ignore
+        """Render all environments and tile them in a 4x4 grid.
 
         Returns:
-            Tuple of rendered images from all environments or None
+            Tiled image as numpy array with shape (height, width, 3) or None
         """
         results: list[np.ndarray] = []
         for env in self.envs:
             result: np.ndarray | None = env.render()  # type: ignore
             if result is not None:
                 results.append(result)  # type: ignore
-        return tuple(results) if results else None
+        
+        if not results:
+            return None
+        
+        # Tile images in a 4x4 grid (max 16 environments)
+        max_envs = min(len(results), 16)
+        results = results[:max_envs]
+        
+        # Calculate grid dimensions
+        grid_cols = min(4, max_envs)
+        grid_rows = (max_envs + grid_cols - 1) // grid_cols
+        
+        # Get dimensions from first image
+        img_height, img_width = results[0].shape[:2]
+        channels = results[0].shape[2] if len(results[0].shape) == 3 else 1
+        
+        # Create tiled image
+        tiled_height = grid_rows * img_height
+        tiled_width = grid_cols * img_width
+        
+        if channels == 1:
+            tiled_image = np.zeros((tiled_height, tiled_width), dtype=results[0].dtype)
+        else:
+            tiled_image = np.zeros((tiled_height, tiled_width, channels), dtype=results[0].dtype)
+        
+        # Fill tiled image
+        for i, img in enumerate(results):
+            row = i // grid_cols
+            col = i % grid_cols
+            
+            start_row = row * img_height
+            end_row = start_row + img_height
+            start_col = col * img_width
+            end_col = start_col + img_width
+            
+            if channels == 1:
+                tiled_image[start_row:end_row, start_col:end_col] = img
+            else:
+                tiled_image[start_row:end_row, start_col:end_col] = img
+        
+        return tiled_image
 
     def close(self, **kwargs):
         """Close all environments."""
