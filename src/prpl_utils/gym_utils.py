@@ -3,54 +3,56 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Union
+from typing import Any, Union
 
 import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space, create_empty_array
-from gymnasium.vector.vector_env import VectorEnv
 
 
-class MultiEnvWrapper(VectorEnv):
-    """A vectorized environment wrapper that parallelizes multiple Gym
-    environments.
+class MultiEnvWrapper(gym.Env):
+    """A batched single-Env wrapper over multiple Gym environments.
 
-    This wrapper creates multiple copies of the same environment and batches their
-    observations, actions, rewards, and done signals for efficient vectorized RL
-    training. Optionally supports PyTorch tensor conversion for seamless integration
-    with neural network training.
-    Follows gymnasium's VectorEnv interface but implemented as a synchronous wrapper.
+    This class exposes N identical sub-environments as ONE `gym.Env` whose
+    observation_space and action_space are the batched versions of the
+    single-env spaces (via `batch_space`). This makes it compatible with
+    wrappers like `gymnasium.wrappers.RecordVideo` that expect `gym.Env`,
+    while still enabling vectorized stepping.
+
+    It supports optional PyTorch tensor IO for seamless RL training, and a
+    tiled `rgb_array` render for video recording.
 
     Args:
         env_fn: A callable that creates a single environment instance
-        num_envs: Number of parallel environments to create
+        num_envs: Number of sub-environments to create
         auto_reset: Whether to automatically reset terminated environments
             (default: True)
         to_tensor: If True, observations and returns will be converted to PyTorch
             tensors, and tensor actions will be accepted (default: False)
         device: Device to place tensors on if to_tensor=True (default: "cpu")
+        render_mode: Render mode; should be "rgb_array" to use RecordVideo
 
     Example:
         >>> import prbench
         >>> prbench.register_all_environments()
-        >>> env_fn = lambda: prbench.make("prbench/StickButton2D-b5-v0")
-        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4)
+        >>> env_fn = lambda: prbench.make("prbench/StickButton2D-b5-v0", render_mode="rgb_array")
+        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4, render_mode="rgb_array")
         >>> obs_batch, info_batch = multi_env.reset(seed=123)
         >>> obs_batch.shape
         (4, observation_dim)
         >>> actions = multi_env.action_space.sample()
-        >>> obs_batch, rewards, terminated, truncated, info_batch = multi_env.step(
-        ...     actions
-        ... )
+        >>> obs_batch, rewards, terminated, truncated, info_batch = multi_env.step(actions)
 
         With tensor support:
-        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4,
-            to_tensor=True, device="cuda")
-        >>> obs_batch, _ = multi_env.reset()  # Returns torch.Tensor on cuda
-        >>> actions = torch.randn((4, action_dim), device="cuda")
-        >>> obs, rewards, done, truncated, _ = multi_env.step(actions)  # All tensors
+        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4, to_tensor=True, device="cuda", render_mode="rgb_array")
+        >>> obs_batch, _ = multi_env.reset()  # returns torch.Tensor on cuda
+        >>> actions = torch.randn((4, *multi_env.single_action_space.shape), device="cuda")
+        >>> obs, rewards, done, truncated, _ = multi_env.step(actions)
     """
+
+    # Make sure RecordVideo recognizes rgb_array rendering
+    metadata = {"render_modes": ["rgb_array"], "render_fps": 30}
 
     def __init__(
         self,
@@ -59,25 +61,30 @@ class MultiEnvWrapper(VectorEnv):
         auto_reset: bool = True,
         to_tensor: bool = False,
         device: str = "cpu",
+        render_mode: str | None = "rgb_array",
     ):
+        super().__init__()
         self.env_fn = env_fn
+        self.num_envs = int(num_envs)
+        assert self.num_envs >= 1, "num_envs must be >= 1"
         self.auto_reset = auto_reset
         self.to_tensor = to_tensor
         self.device = device
+        self.render_mode = render_mode
 
         # Create all sub-environments
-        self.envs = [env_fn() for _ in range(num_envs)]
+        # TIP: Prefer env_fn that accepts render_mode="rgb_array" for recording.
+        self.envs = [env_fn() for _ in range(self.num_envs)]
 
-        # Initialize VectorEnv attributes
-        self.num_envs = num_envs
-        self.observation_space = batch_space(self.envs[0].observation_space, num_envs)
-        self.action_space = batch_space(self.envs[0].action_space, num_envs)
-
-        # Store single environment spaces for reference
+        # Spaces
         self.single_observation_space = self.envs[0].observation_space
         self.single_action_space = self.envs[0].action_space
+        self.observation_space = batch_space(
+            self.single_observation_space, self.num_envs
+        )
+        self.action_space = batch_space(self.single_action_space, self.num_envs)
 
-        # Validate that all environments have the same spaces
+        # Validate homogeneous spaces
         for i, env in enumerate(self.envs):
             assert env.action_space == self.single_action_space, (
                 f"Environment {i} has different action space: {env.action_space} "
@@ -88,86 +95,89 @@ class MultiEnvWrapper(VectorEnv):
                 f"{env.observation_space} vs expected {self.single_observation_space}"
             )
 
-        # Set metadata
-        self.metadata = self.envs[0].metadata.copy()
-        self.metadata["autoreset_mode"] = "next_step" if auto_reset else "disabled"
-
-        # Initialize storage for batched data - use numpy array directly
+        # Buffers
         if isinstance(self.single_observation_space, gym.spaces.Box):
             self._observations = np.zeros(
-                (num_envs,) + self.single_observation_space.shape,
+                (self.num_envs,) + self.single_observation_space.shape,
                 dtype=self.single_observation_space.dtype,
             )
         else:
             self._observations = create_empty_array(
-                self.single_observation_space, n=num_envs, fn=np.zeros
+                self.single_observation_space, n=self.num_envs, fn=np.zeros  # type: ignore
             )  # type: ignore
-        self._rewards = np.zeros((num_envs,), dtype=np.float64)
-        self._terminations = np.zeros((num_envs,), dtype=np.bool_)
-        self._truncations = np.zeros((num_envs,), dtype=np.bool_)
-        self._env_needs_reset = np.ones((num_envs,), dtype=np.bool_)
+        self._rewards = np.zeros((self.num_envs,), dtype=np.float32)
+        self._terminations = np.zeros((self.num_envs,), dtype=np.bool_)
+        self._truncations = np.zeros((self.num_envs,), dtype=np.bool_)
+        self._env_needs_reset = np.ones((self.num_envs,), dtype=np.bool_)
+
+        # Copy metadata and annotate autoreset status
+        self.metadata = dict(getattr(self.envs[0], "metadata", {}))
+        self.metadata["render_modes"] = list(
+            set(self.metadata.get("render_modes", []) + ["rgb_array"])
+        )
+        self.metadata["autoreset_mode"] = "next_step" if auto_reset else "disabled"
+
+    # ------------------------- utilities -------------------------
 
     def _to_tensor(self, array: np.ndarray) -> Union[np.ndarray, torch.Tensor]:
-        """Convert numpy array to tensor if to_tensor is True."""
         if self.to_tensor:
             return torch.from_numpy(array).to(self.device)
         return array
 
     def _to_numpy(self, data: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
-        """Convert tensor to numpy array if needed."""
         if torch.is_tensor(data):
             return data.detach().cpu().numpy()
         return data
 
+    # --------------------------- API -----------------------------
+
     def reset(
         self, *, seed: int | Sequence[int] | None = None, options: dict | None = None
     ) -> tuple[Union[np.ndarray, torch.Tensor], dict]:
-        """Reset all environments and return batched observations.
-
-        Args:
-            seed: Random seed(s) for the environments
-            options: Environment-specific options
-
-        Returns:
-            Batched observations (as tensor if to_tensor=True) and info dict
-        """
-        # Handle seeding
+        """Reset all sub-environments and return batched observation and
+        info."""
+        # Distribute seeds
         if seed is not None:
             if isinstance(seed, int):
-                # Generate different seeds for each environment
                 seeds_final: list[int | None] = [seed + i for i in range(self.num_envs)]
             else:
+                seed = list(seed)
                 assert (
                     len(seed) == self.num_envs
                 ), f"Seed list length {len(seed)} doesn't match num_envs {self.num_envs}"
-                seeds_final = list(seed)
+                seeds_final = seed  # type: ignore
         else:
             seeds_final = [None] * self.num_envs
 
-        # Reset all environments
-        infos: dict = {}
+        # Reset
+        infos: dict[str, Any] = {}
         for i, (env, env_seed) in enumerate(zip(self.envs, seeds_final)):
             obs, info = env.reset(seed=env_seed, options=options)
-            self._observations[i] = obs
+            # Write obs into buffer
+            if isinstance(self.single_observation_space, gym.spaces.Box):
+                self._observations[i] = obs
+            else:
+                # For Dict/Tuple/etc. spaces, rely on create_empty_array structure
+                self._observations[i] = obs  # type: ignore[assignment]
 
-            # Accumulate info dicts - create arrays for each key
+            # Batch info
             for key, value in info.items():
                 if key not in infos:
                     infos[key] = [None] * self.num_envs  # type: ignore
                 infos[key][i] = value
 
-        # Convert info lists to arrays where possible
-        for key, value_list in infos.items():
+        # Convert info lists to arrays when possible
+        for key, value_list in list(infos.items()):
             try:
                 infos[key] = np.array(value_list)  # type: ignore
             except (ValueError, TypeError):
-                # Keep as list if can't convert to array
                 pass
 
-        # Reset tracking flags
+        # Reset trackers
         self._env_needs_reset.fill(False)
         self._terminations.fill(False)
         self._truncations.fill(False)
+        self._rewards.fill(0.0)
 
         observations = np.array(self._observations)
         return self._to_tensor(observations), infos
@@ -179,66 +189,59 @@ class MultiEnvWrapper(VectorEnv):
         Union[np.ndarray, torch.Tensor],
         dict,
     ]:
-        """Step all environments with batched actions.
-
-        Args:
-            actions: Batched actions with shape (num_envs, action_dim)
-                    Can be numpy array or torch tensor
-
-        Returns:
-            Batched observations, rewards, terminations, truncations, and infos
-            Returns tensors if to_tensor=True, otherwise numpy arrays
-        """
-        # Convert actions to numpy if they are tensors
+        """Step all sub-environments with batched actions."""
         actions_np = self._to_numpy(actions)
         assert self.action_space.contains(actions_np), "Actions not in action space"
 
-        infos: dict = {}
+        infos: dict[str, Any] = {}
 
         for i, env in enumerate(self.envs):
-            # Handle auto-reset after termination/truncation
+            # Auto-reset paths
             if self._env_needs_reset[i] and self.auto_reset:
                 obs, reset_info = env.reset()
-                self._observations[i] = obs
-                # Use reset observation and zero reward for auto-reset
+                if isinstance(self.single_observation_space, gym.spaces.Box):
+                    self._observations[i] = obs
+                else:
+                    self._observations[i] = obs  # type: ignore[assignment]
                 self._rewards[i] = 0.0
                 self._terminations[i] = False
                 self._truncations[i] = False
                 self._env_needs_reset[i] = False
 
-                # Add reset info to the batch
                 for key, value in reset_info.items():
                     if key not in infos:
                         infos[key] = [None] * self.num_envs  # type: ignore
                     infos[key][i] = value
                 continue
 
-            # Step the environment normally
+            # Normal step
             action = actions_np[i]
             obs, reward, terminated, truncated, info = env.step(action)
 
-            # Store results
-            self._observations[i] = obs
-            self._rewards[i] = reward
-            self._terminations[i] = terminated
-            self._truncations[i] = truncated
+            if isinstance(self.single_observation_space, gym.spaces.Box):
+                self._observations[i] = obs
+            else:
+                self._observations[i] = obs  # type: ignore[assignment]
+            self._rewards[i] = np.float32(reward)
+            self._terminations[i] = bool(terminated)
+            self._truncations[i] = bool(truncated)
 
-            # Mark environment for reset if done
+            # If done, mark for auto-reset next call; also stash finals per Gymnasium convention
             if terminated or truncated:
+                info.setdefault("final_observation", obs)
+                info.setdefault("final_info", info.copy())
                 self._env_needs_reset[i] = True
 
-            # Accumulate info
             for key, value in info.items():
                 if key not in infos:
                     infos[key] = [None] * self.num_envs  # type: ignore
                 infos[key][i] = value
 
         # Convert info lists to arrays where possible
-        for key, value_list in infos.items():
+        for key, value_list in list(infos.items()):
             try:
                 infos[key] = np.array(value_list)  # type: ignore
             except (ValueError, TypeError):
-                # Keep as list if can't convert to array
                 pass
 
         observations = np.array(self._observations)
@@ -316,28 +319,36 @@ class MultiEnvWrapper(VectorEnv):
             if hasattr(env, "close"):
                 env.close()
 
-    def seed(self, seeds: int | Sequence[int] | None = None):
-        """Seed all environments.
+    # ----------------------- seeding helpers ---------------------
 
-        Args:
-            seeds: Single seed or sequence of seeds for each environment
+    def seed(self, seeds: int | Sequence[int] | None = None):
+        """Seed sub-envs.
+
+        Prefer `reset(seed=...)` for Gymnasium compatibility.
         """
         if seeds is None:
             seeds_list: list[int | None] = [None] * self.num_envs
         elif isinstance(seeds, int):
             seeds_list = [seeds + i for i in range(self.num_envs)]
         else:
-            assert len(seeds) == self.num_envs, (
-                f"Seed sequence length {len(seeds)} doesn't match num_envs "
-                f"{self.num_envs}"
-            )
-            seeds_list = list(seeds)  # type: ignore
+            seeds = list(seeds)
+            assert (
+                len(seeds) == self.num_envs
+            ), f"Seed sequence length {len(seeds)} doesn't match num_envs {self.num_envs}"
+            seeds_list = seeds  # type: ignore
 
-        for env, seed in zip(self.envs, seeds_list):
+        for env, s in zip(self.envs, seeds_list):
+            # Best-effort: Gymnasium prefers `reset(seed=...)`; some spaces still allow action_space.seed
+            try:
+                env.reset(seed=s)
+            except Exception:
+                pass
             if hasattr(env.action_space, "seed"):
-                env.action_space.seed(seed)
+                env.action_space.seed(s)
+
+    # -------------------------- misc -----------------------------
 
     @property
     def unwrapped(self):
-        """Return the underlying environments."""
+        """Return the underlying sub-environments list."""
         return self.envs
