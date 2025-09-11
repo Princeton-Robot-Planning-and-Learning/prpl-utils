@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Union
 
 import gymnasium as gym
 import numpy as np
+import torch
 from gymnasium.vector.utils import batch_space, create_empty_array
 from gymnasium.vector.vector_env import VectorEnv
 
@@ -16,7 +18,8 @@ class MultiEnvWrapper(VectorEnv):
 
     This wrapper creates multiple copies of the same environment and batches their
     observations, actions, rewards, and done signals for efficient vectorized RL
-    training.
+    training. Optionally supports PyTorch tensor conversion for seamless integration
+    with neural network training.
     Follows gymnasium's VectorEnv interface but implemented as a synchronous wrapper.
 
     Args:
@@ -24,6 +27,9 @@ class MultiEnvWrapper(VectorEnv):
         num_envs: Number of parallel environments to create
         auto_reset: Whether to automatically reset terminated environments
             (default: True)
+        to_tensor: If True, observations and returns will be converted to PyTorch
+            tensors, and tensor actions will be accepted (default: False)
+        device: Device to place tensors on if to_tensor=True (default: "cpu")
 
     Example:
         >>> import prbench
@@ -37,14 +43,27 @@ class MultiEnvWrapper(VectorEnv):
         >>> obs_batch, rewards, terminated, truncated, info_batch = multi_env.step(
         ...     actions
         ... )
+
+        With tensor support:
+        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4,
+            to_tensor=True, device="cuda")
+        >>> obs_batch, _ = multi_env.reset()  # Returns torch.Tensor on cuda
+        >>> actions = torch.randn((4, action_dim), device="cuda")
+        >>> obs, rewards, done, truncated, _ = multi_env.step(actions)  # All tensors
     """
 
     def __init__(
-        self, env_fn: Callable[[], gym.Env], num_envs: int, auto_reset: bool = True,
-        to_tensor: bool = False, device: str = "cpu"
+        self,
+        env_fn: Callable[[], gym.Env],
+        num_envs: int,
+        auto_reset: bool = True,
+        to_tensor: bool = False,
+        device: str = "cpu",
     ):
         self.env_fn = env_fn
         self.auto_reset = auto_reset
+        self.to_tensor = to_tensor
+        self.device = device
 
         # Create all sub-environments
         self.envs = [env_fn() for _ in range(num_envs)]
@@ -88,9 +107,21 @@ class MultiEnvWrapper(VectorEnv):
         self._truncations = np.zeros((num_envs,), dtype=np.bool_)
         self._env_needs_reset = np.ones((num_envs,), dtype=np.bool_)
 
+    def _to_tensor(self, array: np.ndarray) -> Union[np.ndarray, torch.Tensor]:
+        """Convert numpy array to tensor if to_tensor is True."""
+        if self.to_tensor:
+            return torch.from_numpy(array).to(self.device)
+        return array
+
+    def _to_numpy(self, data: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+        """Convert tensor to numpy array if needed."""
+        if torch.is_tensor(data):
+            return data.detach().cpu().numpy()
+        return data
+
     def reset(
         self, *, seed: int | Sequence[int] | None = None, options: dict | None = None
-    ) -> tuple[np.ndarray, dict]:
+    ) -> tuple[Union[np.ndarray, torch.Tensor], dict]:
         """Reset all environments and return batched observations.
 
         Args:
@@ -98,7 +129,7 @@ class MultiEnvWrapper(VectorEnv):
             options: Environment-specific options
 
         Returns:
-            Batched observations and info dict
+            Batched observations (as tensor if to_tensor=True) and info dict
         """
         # Handle seeding
         if seed is not None:
@@ -138,24 +169,29 @@ class MultiEnvWrapper(VectorEnv):
         self._terminations.fill(False)
         self._truncations.fill(False)
 
-        return np.array(self._observations), infos
+        observations = np.array(self._observations)
+        return self._to_tensor(observations), infos
 
-    def step(self, actions: np.ndarray) -> tuple[
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
+    def step(self, actions: Union[np.ndarray, torch.Tensor]) -> tuple[
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
         dict,
     ]:
         """Step all environments with batched actions.
 
         Args:
             actions: Batched actions with shape (num_envs, action_dim)
+                    Can be numpy array or torch tensor
 
         Returns:
             Batched observations, rewards, terminations, truncations, and infos
+            Returns tensors if to_tensor=True, otherwise numpy arrays
         """
-        assert self.action_space.contains(actions), "Actions not in action space"
+        # Convert actions to numpy if they are tensors
+        actions_np = self._to_numpy(actions)
+        assert self.action_space.contains(actions_np), "Actions not in action space"
 
         infos: dict = {}
 
@@ -178,7 +214,7 @@ class MultiEnvWrapper(VectorEnv):
                 continue
 
             # Step the environment normally
-            action = actions[i]
+            action = actions_np[i]
             obs, reward, terminated, truncated, info = env.step(action)
 
             # Store results
@@ -205,11 +241,16 @@ class MultiEnvWrapper(VectorEnv):
                 # Keep as list if can't convert to array
                 pass
 
+        observations = np.array(self._observations)
+        rewards = self._rewards.copy()
+        terminations = self._terminations.copy()
+        truncations = self._truncations.copy()
+
         return (
-            np.array(self._observations),
-            self._rewards.copy(),
-            self._terminations.copy(),
-            self._truncations.copy(),
+            self._to_tensor(observations),
+            self._to_tensor(rewards),
+            self._to_tensor(terminations),
+            self._to_tensor(truncations),
             infos,
         )
 
@@ -224,46 +265,48 @@ class MultiEnvWrapper(VectorEnv):
             result: np.ndarray | None = env.render()  # type: ignore
             if result is not None:
                 results.append(result)  # type: ignore
-        
+
         if not results:
             return None
-        
+
         # Tile images in a 4x4 grid (max 16 environments)
         max_envs = min(len(results), 16)
         results = results[:max_envs]
-        
+
         # Calculate grid dimensions
         grid_cols = min(4, max_envs)
         grid_rows = (max_envs + grid_cols - 1) // grid_cols
-        
+
         # Get dimensions from first image
         img_height, img_width = results[0].shape[:2]
         channels = results[0].shape[2] if len(results[0].shape) == 3 else 1
-        
+
         # Create tiled image
         tiled_height = grid_rows * img_height
         tiled_width = grid_cols * img_width
-        
+
         if channels == 1:
             tiled_image = np.zeros((tiled_height, tiled_width), dtype=results[0].dtype)
         else:
-            tiled_image = np.zeros((tiled_height, tiled_width, channels), dtype=results[0].dtype)
-        
+            tiled_image = np.zeros(
+                (tiled_height, tiled_width, channels), dtype=results[0].dtype
+            )
+
         # Fill tiled image
         for i, img in enumerate(results):
             row = i // grid_cols
             col = i % grid_cols
-            
+
             start_row = row * img_height
             end_row = start_row + img_height
             start_col = col * img_width
             end_col = start_col + img_width
-            
+
             if channels == 1:
                 tiled_image[start_row:end_row, start_col:end_col] = img
             else:
                 tiled_image[start_row:end_row, start_col:end_col] = img
-        
+
         return tiled_image
 
     def close(self, **kwargs):
