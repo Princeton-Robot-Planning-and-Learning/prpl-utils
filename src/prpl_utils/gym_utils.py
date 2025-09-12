@@ -117,6 +117,9 @@ class MultiEnvWrapper(gym.Env):
         )
         self.metadata["autoreset_mode"] = "next_step" if auto_reset else "disabled"
 
+        elapsed_steps = np.zeros((self.num_envs,), dtype=np.int32)
+        self.elapsed_steps = self._to_tensor(elapsed_steps)
+
     # ------------------------- utilities -------------------------
 
     def _to_tensor(self, array: np.ndarray) -> Union[np.ndarray, torch.Tensor]:
@@ -152,7 +155,21 @@ class MultiEnvWrapper(gym.Env):
         # Reset
         infos: dict[str, Any] = {}
         for i, (env, env_seed) in enumerate(zip(self.envs, seeds_final)):
-            obs, info = env.reset(seed=env_seed, options=options)
+            # NOTE: Need to handle reset init_states properly here
+            # for each sub-env. we assume the init_states must be
+            # provided as a batch of states for all sub-envs.
+            local_options = None
+            if options is not None:
+                local_options = dict(options)  # shallow copy
+                if "init_state" in options.keys():
+                    assert (
+                        isinstance(options["init_state"], (np.ndarray, torch.Tensor))
+                        and options["init_state"].shape[0] == self.num_envs
+                    ), "If providing init_state in options, it must be a batch of states for all sub-envs"
+                    local_options = dict(options)  # shallow copy
+                    local_options["init_state"] = self._to_numpy(options["init_state"][i])
+            
+            obs, info = env.reset(seed=env_seed, options=local_options)
             # Write obs into buffer
             if isinstance(self.single_observation_space, gym.spaces.Box):
                 self._observations[i] = obs
@@ -181,6 +198,7 @@ class MultiEnvWrapper(gym.Env):
         self._terminations.fill(False)
         self._truncations.fill(False)
         self._rewards.fill(0.0)
+        self.elapsed_steps = self._to_tensor(np.zeros((self.num_envs,), dtype=np.int32))
 
         observations = np.array(self._observations)
         return self._to_tensor(observations), infos
@@ -195,6 +213,7 @@ class MultiEnvWrapper(gym.Env):
         """Step all sub-environments with batched actions."""
         actions_np = self._to_numpy(actions)
         assert self.action_space.contains(actions_np), "Actions not in action space"
+        self.elapsed_steps += 1
 
         infos: dict[str, Any] = {}
 
@@ -210,6 +229,7 @@ class MultiEnvWrapper(gym.Env):
                 self._terminations[i] = False
                 self._truncations[i] = False
                 self._env_needs_reset[i] = False
+                self.elapsed_steps[i] = 0
 
                 for key, value in reset_info.items():
                     if key not in infos:
