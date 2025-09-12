@@ -166,12 +166,15 @@ class MultiEnvWrapper(gym.Env):
                     infos[key] = [None] * self.num_envs  # type: ignore
                 infos[key][i] = value
 
-        # Convert info lists to arrays when possible
+        # Convert info lists to arrays for scalar values (float/int)
         for key, value_list in list(infos.items()):
-            try:
-                infos[key] = np.array(value_list)  # type: ignore
-            except (ValueError, TypeError):
-                pass
+            if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
+                array = np.array(value_list, dtype=np.float32)
+                infos[key] = self._to_tensor(array)  # type: ignore
+            else:
+                assert all(isinstance(v, bool) for v in value_list)
+                array = np.array(value_list, dtype=np.bool_)
+                infos[key] = self._to_tensor(array)  # type: ignore
 
         # Reset trackers
         self._env_needs_reset.fill(False)
@@ -237,12 +240,15 @@ class MultiEnvWrapper(gym.Env):
                     infos[key] = [None] * self.num_envs  # type: ignore
                 infos[key][i] = value
 
-        # Convert info lists to arrays where possible
+        # Convert info lists to arrays for scalar values (float/int)
         for key, value_list in list(infos.items()):
-            try:
-                infos[key] = np.array(value_list)  # type: ignore
-            except (ValueError, TypeError):
-                pass
+            if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
+                array = np.array(value_list, dtype=np.float32)
+                infos[key] = self._to_tensor(array)  # type: ignore
+            else:
+                assert all(isinstance(v, bool) for v in value_list if v is not None)
+                array = np.array(value_list, dtype=np.bool_)
+                infos[key] = self._to_tensor(array)  # type: ignore
 
         observations = np.array(self._observations)
         rewards = self._rewards.copy()
