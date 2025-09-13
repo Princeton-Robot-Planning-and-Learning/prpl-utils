@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space, create_empty_array
+from gymnasium.wrappers import RecordVideo
 
 
 class MultiEnvWrapper(gym.Env):
@@ -58,6 +59,7 @@ class MultiEnvWrapper(gym.Env):
         self,
         env_fn: Callable[[], gym.Env],
         num_envs: int,
+        max_episode_steps: int | None = None,
         auto_reset: bool = True,
         to_tensor: bool = False,
         device: str = "cpu",
@@ -119,6 +121,9 @@ class MultiEnvWrapper(gym.Env):
 
         elapsed_steps = np.zeros((self.num_envs,), dtype=np.int32)
         self.elapsed_steps = self._to_tensor(elapsed_steps)
+        self._max_episode_steps = max_episode_steps
+        if max_episode_steps is not None:
+            print("Warning: max_episode_steps is now enforced by MultiEnvWrapper, will ignore per env truncation.")
 
     # ------------------------- utilities -------------------------
 
@@ -188,10 +193,6 @@ class MultiEnvWrapper(gym.Env):
             if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
                 array = np.array(value_list, dtype=np.float32)
                 infos[key] = self._to_tensor(array)  # type: ignore
-            else:
-                assert all(isinstance(v, bool) for v in value_list)
-                array = np.array(value_list, dtype=np.bool_)
-                infos[key] = self._to_tensor(array)  # type: ignore
 
         # Reset trackers
         self._env_needs_reset.fill(False)
@@ -247,6 +248,8 @@ class MultiEnvWrapper(gym.Env):
                 self._observations[i] = obs  # type: ignore[assignment]
             self._rewards[i] = np.float32(reward)
             self._terminations[i] = bool(terminated)
+            if self._max_episode_steps is not None:
+                truncated = self.elapsed_steps[i].item() >= self._max_episode_steps
             self._truncations[i] = bool(truncated)
 
             # If done, mark for auto-reset next call; also stash finals per Gymnasium convention
@@ -264,10 +267,6 @@ class MultiEnvWrapper(gym.Env):
         for key, value_list in list(infos.items()):
             if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
                 array = np.array(value_list, dtype=np.float32)
-                infos[key] = self._to_tensor(array)  # type: ignore
-            else:
-                assert all(isinstance(v, bool) for v in value_list if v is not None)
-                array = np.array(value_list, dtype=np.bool_)
                 infos[key] = self._to_tensor(array)  # type: ignore
 
         observations = np.array(self._observations)
@@ -378,3 +377,84 @@ class MultiEnvWrapper(gym.Env):
     def unwrapped(self):
         """Return the underlying sub-environments list."""
         return self.envs
+
+
+class MultiEnvRecordVideo(RecordVideo):
+    """
+    A `RecordVideo` wrapper for `MultiEnvWrapper` that records tiled
+    rgb_array renders of all sub-environments.
+
+    We need this because the standard `RecordVideo` expects a
+    boolean terminal / truncated signal from the `step()` call, but
+    `MultiEnvWrapper` returns a batch of such signals, one per
+    sub-environment.
+
+    NOTE: This wrapper currently only supports episode based recording.
+    """
+    def __init__(
+        self,
+        env: MultiEnvWrapper,
+        video_folder: str,
+        episode_trigger: Callable[[int], bool] | None = None,
+        step_trigger: Callable[[int], bool] | None = None,
+        video_length: int = 0,
+        name_prefix: str = "rl-video",
+        disable_logger: bool = False,
+    ):
+        assert isinstance(
+            env, MultiEnvWrapper
+        ), "MultiEnvRecordVideo only works with MultiEnvWrapper"
+        super().__init__(
+            env,
+            video_folder,
+            episode_trigger,
+            step_trigger,
+            video_length,
+            name_prefix,
+            disable_logger,
+        )
+        self.is_vector_env = True  # To avoid checks in RecordVideo
+
+
+    def step(self, action) -> tuple[
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
+        Union[np.ndarray, torch.Tensor],
+        dict,
+    ]:
+        """Steps through the environment using action, 
+        recording observations if :attr:`self.recording`."""
+        (
+            observations,
+            rewards,
+            terminateds,
+            truncateds,
+            infos,
+        ) = self.env.step(action)
+
+        if not (self.terminated or self.truncated):
+            # increment steps and episodes
+            self.step_id += 1
+            if torch.all(truncateds):
+                # NOTE: We assume all the sub-envs are truncated 
+                # at the same time
+                self.episode_id += 1
+                self.terminated = terminateds[0].item()
+                self.truncated = truncateds[0].item()
+
+            if self.recording:
+                assert self.video_recorder is not None
+                self.video_recorder.capture_frame()
+                self.recorded_frames += 1
+                if self.video_length > 0:
+                    if self.recorded_frames > self.video_length:
+                        self.close_video_recorder()
+                else:
+                    if terminateds[0].item() or truncateds[0].item():
+                        self.close_video_recorder()
+
+            elif self._video_enabled():
+                self.start_video_recorder()
+
+        return observations, rewards, terminateds, truncateds, infos
