@@ -212,12 +212,12 @@ class MultiEnvWrapper(gym.Env):
         observations = np.array(self._observations)
         return self._to_tensor(observations), infos
 
-    def step(self, actions: Union[np.ndarray, torch.Tensor]) -> tuple[
+    def step(self, actions: Union[np.ndarray, torch.Tensor]) -> tuple[  # type: ignore[override]
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
-        dict,
+        dict[str, Any],
     ]:
         """Step all sub-environments with batched actions."""
         actions_np = self._to_numpy(actions)
@@ -404,36 +404,26 @@ class MultiEnvRecordVideo(RecordVideo):
     def __init__(
         self,
         env: MultiEnvWrapper,
-        video_folder: str,
-        episode_trigger: Callable[[int], bool] | None = None,
-        step_trigger: Callable[[int], bool] | None = None,
-        video_length: int = 0,
-        name_prefix: str = "rl-video",
-        disable_logger: bool = False,
+        *args,
+        **kwargs,
     ):
         assert isinstance(
             env, MultiEnvWrapper
         ), "MultiEnvRecordVideo only works with MultiEnvWrapper"
-        super().__init__(
-            env,
-            video_folder,
-            episode_trigger,
-            step_trigger,
-            video_length,
-            name_prefix,
-            disable_logger,
-        )
+
+        super().__init__(env, *args, **kwargs)
         self.is_vector_env = True  # To avoid checks in RecordVideo
 
-    def step(self, action) -> tuple[
+    def step(self, action) -> tuple[  # type: ignore[override]
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
-        dict,
+        dict[str, Any],
     ]:
         """Steps through the environment using action, recording observations
         if :attr:`self.recording`."""
+        assert isinstance(self.env, MultiEnvWrapper)
         (
             observations,
             rewards,
@@ -445,25 +435,46 @@ class MultiEnvRecordVideo(RecordVideo):
         if not (self.terminated or self.truncated):
             # increment steps and episodes
             self.step_id += 1
-            if torch.all(truncateds):
+
+            if isinstance(truncateds, torch.Tensor):
+                all_truncated = bool(torch.all(truncateds).item())
+            else:
+                all_truncated = bool(np.all(truncateds))
+
+            if all_truncated:
                 # NOTE: We assume all the sub-envs are truncated
                 # at the same time
                 self.episode_id += 1
-                self.terminated = terminateds[0].item()
-                self.truncated = truncateds[0].item()
+                if isinstance(truncateds, torch.Tensor):
+                    self.terminated = bool(truncateds[0].item())
+                else:
+                    self.terminated = bool(truncateds[0])
+                if isinstance(truncateds, torch.Tensor):
+                    self.truncated = bool(truncateds[0].item())
+                else:
+                    self.truncated = bool(truncateds[0])
 
             if self.recording:
                 assert self.video_recorder is not None
-                self.video_recorder.capture_frame()
+                self.video_recorder.capture_frame()  # type: ignore
                 self.recorded_frames += 1
                 if self.video_length > 0:
                     if self.recorded_frames > self.video_length:
-                        self.close_video_recorder()
+                        self.close_video_recorder()  # type: ignore
                 else:
-                    if terminateds[0].item() or truncateds[0].item():
-                        self.close_video_recorder()
+                    # Cast to Any to avoid mypy type issues
+                    if isinstance(terminateds, torch.Tensor):
+                        term_val = bool(terminateds[0].item())
+                    else:
+                        term_val = bool(terminateds[0])
+                    if isinstance(truncateds, torch.Tensor):
+                        trunc_val = bool(truncateds[0].item())
+                    else:
+                        trunc_val = bool(truncateds[0])
+                    if term_val or trunc_val:
+                        self.close_video_recorder()  # type: ignore
 
-            elif self._video_enabled():
-                self.start_video_recorder()
+            elif self._video_enabled():  # type: ignore
+                self.start_video_recorder()  # type: ignore
 
-        return observations, rewards, terminateds, truncateds, infos
+        return observations, rewards, terminateds, truncateds, infos  # type: ignore
