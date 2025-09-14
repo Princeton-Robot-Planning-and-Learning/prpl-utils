@@ -252,10 +252,8 @@ class MultiEnvWrapper(gym.Env):
                 truncated = self.elapsed_steps[i].item() >= self._max_episode_steps
             self._truncations[i] = bool(truncated)
 
-            # If done, mark for auto-reset next call; also stash finals per Gymnasium convention
+            # If done, mark for auto-reset next call
             if terminated or truncated:
-                info.setdefault("final_observation", obs)
-                info.setdefault("final_info", info.copy())
                 self._env_needs_reset[i] = True
 
             for key, value in info.items():
