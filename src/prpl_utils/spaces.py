@@ -52,6 +52,8 @@ class FunctionalSpace(gym.spaces.Space[_Element]):
     def sample(
         self, mask: Any | None = None, probability: Any | None = None
     ) -> _Element:
+        del mask  # Unused
+        del probability  # Unused
         if self._sample_fn is None:
             raise NotImplementedError("Sampling not implemented for space")
         return self._sample_fn(self.np_random)
