@@ -123,7 +123,9 @@ class MultiEnvWrapper(gym.Env):
         self.elapsed_steps = self._to_tensor(elapsed_steps)
         self._max_episode_steps = max_episode_steps
         if max_episode_steps is not None:
-            print("Warning: max_episode_steps is now enforced by MultiEnvWrapper, will ignore per env truncation.")
+            print(
+                "Warning: max_episode_steps is now enforced by MultiEnvWrapper, will ignore per env truncation."
+            )
 
     # ------------------------- utilities -------------------------
 
@@ -172,8 +174,10 @@ class MultiEnvWrapper(gym.Env):
                         and options["init_state"].shape[0] == self.num_envs
                     ), "If providing init_state in options, it must be a batch of states for all sub-envs"
                     local_options = dict(options)  # shallow copy
-                    local_options["init_state"] = self._to_numpy(options["init_state"][i])
-            
+                    local_options["init_state"] = self._to_numpy(
+                        options["init_state"][i]
+                    )
+
             obs, info = env.reset(seed=env_seed, options=local_options)
             # Write obs into buffer
             if isinstance(self.single_observation_space, gym.spaces.Box):
@@ -190,7 +194,11 @@ class MultiEnvWrapper(gym.Env):
 
         # Convert info lists to arrays for scalar values (float/int)
         for key, value_list in list(infos.items()):
-            if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
+            if all(
+                isinstance(v, (int, float, np.integer, np.floating))
+                for v in value_list
+                if v is not None
+            ):
                 array = np.array(value_list, dtype=np.float32)
                 infos[key] = self._to_tensor(array)  # type: ignore
 
@@ -263,7 +271,11 @@ class MultiEnvWrapper(gym.Env):
 
         # Convert info lists to arrays for scalar values (float/int)
         for key, value_list in list(infos.items()):
-            if all(isinstance(v, (int, float, np.integer, np.floating)) for v in value_list if v is not None):
+            if all(
+                isinstance(v, (int, float, np.integer, np.floating))
+                for v in value_list
+                if v is not None
+            ):
                 array = np.array(value_list, dtype=np.float32)
                 infos[key] = self._to_tensor(array)  # type: ignore
 
@@ -378,8 +390,7 @@ class MultiEnvWrapper(gym.Env):
 
 
 class MultiEnvRecordVideo(RecordVideo):
-    """
-    A `RecordVideo` wrapper for `MultiEnvWrapper` that records tiled
+    """A `RecordVideo` wrapper for `MultiEnvWrapper` that records tiled
     rgb_array renders of all sub-environments.
 
     We need this because the standard `RecordVideo` expects a
@@ -389,6 +400,7 @@ class MultiEnvRecordVideo(RecordVideo):
 
     NOTE: This wrapper currently only supports episode based recording.
     """
+
     def __init__(
         self,
         env: MultiEnvWrapper,
@@ -413,7 +425,6 @@ class MultiEnvRecordVideo(RecordVideo):
         )
         self.is_vector_env = True  # To avoid checks in RecordVideo
 
-
     def step(self, action) -> tuple[
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
@@ -421,8 +432,8 @@ class MultiEnvRecordVideo(RecordVideo):
         Union[np.ndarray, torch.Tensor],
         dict,
     ]:
-        """Steps through the environment using action, 
-        recording observations if :attr:`self.recording`."""
+        """Steps through the environment using action, recording observations
+        if :attr:`self.recording`."""
         (
             observations,
             rewards,
@@ -435,7 +446,7 @@ class MultiEnvRecordVideo(RecordVideo):
             # increment steps and episodes
             self.step_id += 1
             if torch.all(truncateds):
-                # NOTE: We assume all the sub-envs are truncated 
+                # NOTE: We assume all the sub-envs are truncated
                 # at the same time
                 self.episode_id += 1
                 self.terminated = terminateds[0].item()
