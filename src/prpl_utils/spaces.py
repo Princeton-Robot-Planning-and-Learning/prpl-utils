@@ -23,6 +23,8 @@ class EnumSpace(gym.spaces.Space[_Element]):
     def sample(
         self, mask: Any | None = None, probability: Any | None = None
     ) -> _Element:
+        del mask  # Unused
+        del probability  # Unused
         return self.elements[self.np_random.choice(self.num_elements)]
 
     def contains(self, x: Any) -> bool:
