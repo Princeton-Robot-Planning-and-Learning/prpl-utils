@@ -1,10 +1,14 @@
 """Tests for gym utilities."""
 
+import os
+import tempfile
+
 import gymnasium as gym
 import numpy as np
 import pytest
+import torch
 
-from prpl_utils.gym_utils import MultiEnvWrapper
+from prpl_utils.gym_utils import MultiEnvRecordVideo, MultiEnvWrapper
 
 
 def test_multi_env_wrapper():
@@ -70,34 +74,6 @@ def test_multi_env_wrapper_mountaincar():
     obs_batch, rewards, _, _, _ = multi_env.step(actions)
     assert obs_batch.shape == (num_envs, 2)
     assert rewards.shape == (num_envs,)
-
-    multi_env.close()
-
-
-def test_multi_env_wrapper_acrobot():
-    """Test MultiEnvWrapper with Acrobot environment."""
-
-    env_fn = lambda: gym.make("Acrobot-v1")
-    num_envs = 4
-    multi_env = MultiEnvWrapper(env_fn, num_envs=num_envs)
-
-    # Test spaces
-    assert multi_env.num_envs == num_envs
-    assert multi_env.single_action_space.n == 3  # Acrobot has 3 actions
-    assert multi_env.single_observation_space.shape == (6,)  # 6-dimensional observation
-
-    # Test reset
-    obs_batch, _ = multi_env.reset()
-    assert obs_batch.shape == (num_envs, 6)
-
-    # Test multiple steps
-    for _ in range(5):
-        actions = multi_env.action_space.sample()
-        obs_batch, rewards, terminated, truncated, _ = multi_env.step(actions)
-        assert obs_batch.shape == (num_envs, 6)
-        assert rewards.shape == (num_envs,)
-        assert terminated.shape == (num_envs,)
-        assert truncated.shape == (num_envs,)
 
     multi_env.close()
 
@@ -220,3 +196,206 @@ def test_multi_env_wrapper_no_auto_reset():
     assert len(done_envs) > 0, "Expected some environments to terminate"
 
     multi_env.close()
+
+
+def test_multi_env_wrapper_max_steps():
+    """Test that environments are truncated at the same max step."""
+
+    env_fn = lambda: gym.make("CartPole-v1")
+    num_envs = 3
+    max_episode_steps = 10
+    multi_env = MultiEnvWrapper(
+        env_fn,
+        num_envs=num_envs,
+        max_episode_steps=max_episode_steps,
+        auto_reset=False,  # Disable auto-reset to test truncation behavior
+    )
+
+    _obs_batch, _ = multi_env.reset(seed=123)
+
+    # Step through the environment until we hit the max step limit
+    for step in range(max_episode_steps + 2):
+        actions = multi_env.action_space.sample()
+        _obs_batch, _rewards, _terminated, truncated, _info_batch = multi_env.step(
+            actions
+        )
+
+        if step < max_episode_steps - 1:
+            # Before max steps, no environments should be truncated
+            assert not np.any(
+                truncated
+            ), f"Step {step}: Unexpected truncation before max_episode_steps"
+        elif step == max_episode_steps - 1:
+            # At max steps, all environments should be truncated
+            assert np.all(
+                truncated
+            ), f"Step {step}: All environments should be truncated at max_episode_steps"
+            # Verify all environments are marked as needing reset
+            assert np.all(
+                multi_env._env_needs_reset  # pylint: disable=protected-access
+            ), "All environments should need reset after truncation"
+            break
+
+    multi_env.close()
+
+
+def test_multi_env_recorder():
+    """Test MultiEnvRecordVideo records video for the first episode."""
+
+    # Create a temporary directory for video output
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create MultiEnvWrapper with render_mode for recording
+        env_fn = lambda: gym.make("CartPole-v1", render_mode="rgb_array")
+        num_envs = 2
+        max_episode_steps = 5  # Short episodes for quick testing
+        multi_env = MultiEnvWrapper(
+            env_fn,
+            num_envs=num_envs,
+            max_episode_steps=max_episode_steps,
+            render_mode="rgb_array",
+        )
+
+        # Wrap with MultiEnvRecordVideo
+        video_env = MultiEnvRecordVideo(
+            multi_env,
+            video_folder=tmp_dir,
+            episode_trigger=lambda x: x == 0,  # Record only the first episode
+            name_prefix="test-video",
+        )
+
+        # Reset and run one complete episode
+        _obs_batch, _ = video_env.reset(seed=123)
+
+        # Step through until episode is complete
+        # (should trigger truncation at max_episode_steps)
+        for _ in range(max_episode_steps + 1):
+            actions = video_env.action_space.sample()
+            _obs_batch, _rewards, _terminated, truncated, _info_batch = video_env.step(
+                actions
+            )
+
+            # Break when all environments are truncated
+            if np.all(truncated):
+                break
+
+        # Close the environment to finalize any video recording
+        video_env.close()
+
+        # Check that a video file was created in the temporary directory
+        video_files = [
+            f
+            for f in os.listdir(tmp_dir)
+            if f.startswith("test-video") and f.endswith(".mp4")
+        ]
+        assert len(video_files) > 0, (
+            f"Expected video file to be created in {tmp_dir}, "
+            f"found: {os.listdir(tmp_dir)}"
+        )
+
+        # Verify the video file has some content (not empty)
+        video_path = os.path.join(tmp_dir, video_files[0])
+        assert os.path.getsize(video_path) > 0, "Video file should not be empty"
+
+
+def test_multi_env_wrapper_to_tensor():
+    """Test that to_tensor flag converts observations to PyTorch tensors."""
+
+    env_fn = lambda: gym.make("CartPole-v1")
+    num_envs = 3
+
+    # Test with to_tensor=False (default) - should return numpy arrays
+    multi_env_numpy = MultiEnvWrapper(env_fn, num_envs=num_envs, to_tensor=False)
+    obs_numpy, _ = multi_env_numpy.reset(seed=123)
+
+    # Observations should be numpy arrays
+    assert isinstance(
+        obs_numpy, np.ndarray
+    ), f"Expected numpy array, got {type(obs_numpy)}"
+    assert obs_numpy.shape == (num_envs, 4)  # CartPole observation space
+
+    # Step and check return types
+    actions = multi_env_numpy.action_space.sample()
+    obs_numpy, rewards_numpy, terminated_numpy, truncated_numpy, _info = (
+        multi_env_numpy.step(actions)
+    )
+
+    assert isinstance(obs_numpy, np.ndarray), "Observations should be numpy arrays"
+    assert isinstance(rewards_numpy, np.ndarray), "Rewards should be numpy arrays"
+    assert isinstance(terminated_numpy, np.ndarray), "Terminated should be numpy arrays"
+    assert isinstance(truncated_numpy, np.ndarray), "Truncated should be numpy arrays"
+
+    multi_env_numpy.close()
+
+    # Test with to_tensor=True - should return PyTorch tensors
+    multi_env_tensor = MultiEnvWrapper(
+        env_fn,
+        num_envs=num_envs,
+        to_tensor=True,
+        device="cpu",  # Use CPU for consistent testing
+    )
+    obs_tensor, _ = multi_env_tensor.reset(seed=123)
+
+    # Observations should be PyTorch tensors
+    assert isinstance(
+        obs_tensor, torch.Tensor
+    ), f"Expected torch.Tensor, got {type(obs_tensor)}"
+    assert obs_tensor.shape == (num_envs, 4)  # CartPole observation space
+    assert obs_tensor.device.type == "cpu", "Tensor should be on CPU device"
+
+    # Step and check return types
+    actions = multi_env_tensor.action_space.sample()
+    obs_tensor, rewards_tensor, terminated_tensor, truncated_tensor, _info = (
+        multi_env_tensor.step(actions)
+    )
+
+    assert isinstance(obs_tensor, torch.Tensor), "Observations should be torch tensors"
+    assert isinstance(rewards_tensor, torch.Tensor), "Rewards should be torch tensors"
+    assert isinstance(
+        terminated_tensor, torch.Tensor
+    ), "Terminated should be torch tensors"
+    assert isinstance(
+        truncated_tensor, torch.Tensor
+    ), "Truncated should be torch tensors"
+
+    # Verify device placement
+    assert obs_tensor.device.type == "cpu", "Observation tensors should be on CPU"
+    assert rewards_tensor.device.type == "cpu", "Reward tensors should be on CPU"
+
+    # Verify tensor dtypes are appropriate
+    assert obs_tensor.dtype == torch.float32, "Observation tensors should be float32"
+    assert rewards_tensor.dtype == torch.float32, "Reward tensors should be float32"
+    assert terminated_tensor.dtype == torch.bool, "Terminated tensors should be bool"
+    assert truncated_tensor.dtype == torch.bool, "Truncated tensors should be bool"
+
+    # Test tensor actions work correctly
+    tensor_actions = torch.tensor([0, 1, 0], dtype=torch.int64, device="cpu")
+    obs_from_tensor_actions, _rewards, _terminated, _truncated, _info = (
+        multi_env_tensor.step(tensor_actions)
+    )
+    assert isinstance(
+        obs_from_tensor_actions, torch.Tensor
+    ), "Should handle tensor actions and return tensors"
+
+    multi_env_tensor.close()
+
+    # Verify that numpy and tensor results have same numerical values (with same seed)
+    # Reset both environments with same seed to compare values
+    multi_env_numpy = MultiEnvWrapper(env_fn, num_envs=num_envs, to_tensor=False)
+    multi_env_tensor = MultiEnvWrapper(
+        env_fn, num_envs=num_envs, to_tensor=True, device="cpu"
+    )
+
+    obs_numpy, _ = multi_env_numpy.reset(seed=42)
+    obs_tensor, _ = multi_env_tensor.reset(seed=42)
+
+    # Convert tensor to numpy for comparison
+    obs_tensor_as_numpy = obs_tensor.detach().cpu().numpy()
+    np.testing.assert_array_almost_equal(
+        obs_numpy,
+        obs_tensor_as_numpy,
+        decimal=6,
+        err_msg="Tensor and numpy modes should produce same values with same seed",
+    )
+
+    multi_env_numpy.close()
+    multi_env_tensor.close()

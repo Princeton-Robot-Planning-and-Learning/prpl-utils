@@ -37,18 +37,23 @@ class MultiEnvWrapper(gym.Env):
     Example:
         >>> import prbench
         >>> prbench.register_all_environments()
-        >>> env_fn = lambda: prbench.make("prbench/StickButton2D-b5-v0", render_mode="rgb_array")
+        >>> env_fn = lambda: prbench.make(
+        ...     "prbench/StickButton2D-b5-v0", render_mode="rgb_array")
         >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4, render_mode="rgb_array")
         >>> obs_batch, info_batch = multi_env.reset(seed=123)
         >>> obs_batch.shape
         (4, observation_dim)
         >>> actions = multi_env.action_space.sample()
-        >>> obs_batch, rewards, terminated, truncated, info_batch = multi_env.step(actions)
+        >>> obs_batch, rewards, terminated, truncated, info_batch = (
+        ...     multi_env.step(actions))
 
         With tensor support:
-        >>> multi_env = MultiEnvWrapper(env_fn, num_envs=4, to_tensor=True, device="cuda", render_mode="rgb_array")
+        >>> multi_env = MultiEnvWrapper(
+        ...     env_fn, num_envs=4, to_tensor=True, device="cuda",
+        ...     render_mode="rgb_array")
         >>> obs_batch, _ = multi_env.reset()  # returns torch.Tensor on cuda
-        >>> actions = torch.randn((4, *multi_env.single_action_space.shape), device="cuda")
+        >>> actions = torch.randn(
+        ...     (4, *multi_env.single_action_space.shape), device="cuda")
         >>> obs, rewards, done, truncated, _ = multi_env.step(actions)
     """
 
@@ -105,7 +110,9 @@ class MultiEnvWrapper(gym.Env):
             )
         else:
             self._observations = create_empty_array(
-                self.single_observation_space, n=self.num_envs, fn=np.zeros  # type: ignore
+                self.single_observation_space,
+                n=self.num_envs,
+                fn=np.zeros,  # type: ignore
             )  # type: ignore
         self._rewards = np.zeros((self.num_envs,), dtype=np.float32)
         self._terminations = np.zeros((self.num_envs,), dtype=np.bool_)
@@ -124,7 +131,8 @@ class MultiEnvWrapper(gym.Env):
         self._max_episode_steps = max_episode_steps
         if max_episode_steps is not None:
             print(
-                "Warning: max_episode_steps is now enforced by MultiEnvWrapper, will ignore per env truncation."
+                "Warning: max_episode_steps is now enforced by "
+                "MultiEnvWrapper, will ignore per env truncation."
             )
 
     # ------------------------- utilities -------------------------
@@ -172,7 +180,10 @@ class MultiEnvWrapper(gym.Env):
                     assert (
                         isinstance(options["init_state"], (np.ndarray, torch.Tensor))
                         and options["init_state"].shape[0] == self.num_envs
-                    ), "If providing init_state in options, it must be a batch of states for all sub-envs"
+                    ), (
+                        "If providing init_state in options, it must be a "
+                        "batch of states for all sub-envs"
+                    )
                     local_options = dict(options)  # shallow copy
                     local_options["init_state"] = self._to_numpy(
                         options["init_state"][i]
@@ -212,7 +223,9 @@ class MultiEnvWrapper(gym.Env):
         observations = np.array(self._observations)
         return self._to_tensor(observations), infos
 
-    def step(self, actions: Union[np.ndarray, torch.Tensor]) -> tuple[  # type: ignore[override]
+    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
+        self, actions: Union[np.ndarray, torch.Tensor]
+    ) -> tuple[
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
@@ -367,13 +380,15 @@ class MultiEnvWrapper(gym.Env):
             seeds_list = [seeds + i for i in range(self.num_envs)]
         else:
             seeds = list(seeds)
-            assert (
-                len(seeds) == self.num_envs
-            ), f"Seed sequence length {len(seeds)} doesn't match num_envs {self.num_envs}"
+            assert len(seeds) == self.num_envs, (
+                f"Seed sequence length {len(seeds)} doesn't match "
+                f"num_envs {self.num_envs}"
+            )
             seeds_list = seeds  # type: ignore
 
         for env, s in zip(self.envs, seeds_list):
-            # Best-effort: Gymnasium prefers `reset(seed=...)`; some spaces still allow action_space.seed
+            # Best-effort: Gymnasium prefers `reset(seed=...)`;
+            # some spaces still allow action_space.seed
             try:
                 env.reset(seed=s)
             except Exception:
@@ -413,15 +428,17 @@ class MultiEnvRecordVideo(RecordVideo):
 
         super().__init__(env, *args, **kwargs)
         self.is_vector_env = True  # To avoid checks in RecordVideo
+        self.terminated: bool = False
+        self.truncated: bool = False
 
-    def step(self, action) -> tuple[  # type: ignore[override]
+    def step(self, actions) -> tuple[  # type: ignore[override]  # pylint: disable=arguments-renamed
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         Union[np.ndarray, torch.Tensor],
         dict[str, Any],
     ]:
-        """Steps through the environment using action, recording observations
+        """Steps through the environment using actions, recording observations
         if :attr:`self.recording`."""
         assert isinstance(self.env, MultiEnvWrapper)
         (
@@ -430,7 +447,7 @@ class MultiEnvRecordVideo(RecordVideo):
             terminateds,
             truncateds,
             infos,
-        ) = self.env.step(action)
+        ) = self.env.step(actions)
 
         if not (self.terminated or self.truncated):
             # increment steps and episodes

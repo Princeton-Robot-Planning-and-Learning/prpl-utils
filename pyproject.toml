@@ -13,7 +13,9 @@ dependencies = [
    "numpy",
    "graphviz",
    "pyperplan",
-   "gymnasium",
+   "gymnasium[classic-control]==0.29.1",
+   "moviepy",
+   "torch"
 ]
 
 [project.optional-dependencies]
