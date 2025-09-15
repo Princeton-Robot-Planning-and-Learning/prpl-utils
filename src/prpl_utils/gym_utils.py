@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, Union
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
 import torch
-from gymnasium.vector.utils import batch_space, create_empty_array
+from gymnasium.vector.utils import batch_space
 from gymnasium.wrappers import RecordVideo
 
 
@@ -21,7 +21,7 @@ class MultiEnvWrapper(gym.Env):
     wrappers like `gymnasium.wrappers.RecordVideo` that expect `gym.Env`,
     while still enabling vectorized stepping.
 
-    It supports optional PyTorch tensor IO for seamless RL training, and a
+    It supports optional PyTorch tensor IO for Deep RL training, and a
     tiled `rgb_array` render for video recording.
 
     Args:
@@ -86,6 +86,9 @@ class MultiEnvWrapper(gym.Env):
         # Spaces
         self.single_observation_space = self.envs[0].observation_space
         self.single_action_space = self.envs[0].action_space
+        assert isinstance(
+            self.single_observation_space, gym.spaces.Box
+        ), "Only Box observation space is supported"
         self.observation_space = batch_space(
             self.single_observation_space, self.num_envs
         )
@@ -103,17 +106,10 @@ class MultiEnvWrapper(gym.Env):
             )
 
         # Buffers
-        if isinstance(self.single_observation_space, gym.spaces.Box):
-            self._observations = np.zeros(
-                (self.num_envs,) + self.single_observation_space.shape,
-                dtype=self.single_observation_space.dtype,
-            )
-        else:
-            self._observations = create_empty_array(
-                self.single_observation_space,
-                n=self.num_envs,
-                fn=np.zeros,  # type: ignore
-            )  # type: ignore
+        self._observations = np.zeros(
+            (self.num_envs,) + self.single_observation_space.shape,
+            dtype=self.single_observation_space.dtype,
+        )
         self._rewards = np.zeros((self.num_envs,), dtype=np.float32)
         self._terminations = np.zeros((self.num_envs,), dtype=np.bool_)
         self._truncations = np.zeros((self.num_envs,), dtype=np.bool_)
@@ -135,14 +131,14 @@ class MultiEnvWrapper(gym.Env):
                 "MultiEnvWrapper, will ignore per env truncation."
             )
 
-    # ------------------------- utilities -------------------------
+    # ------------------------- Utilities -------------------------
 
-    def _to_tensor(self, array: np.ndarray) -> Union[np.ndarray, torch.Tensor]:
+    def _to_tensor(self, array: np.ndarray) -> np.ndarray | torch.Tensor:
         if self.to_tensor:
             return torch.from_numpy(array).to(self.device)
         return array
 
-    def _to_numpy(self, data: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+    def _to_numpy(self, data: np.ndarray | torch.Tensor) -> np.ndarray:
         if torch.is_tensor(data):
             return data.detach().cpu().numpy()
         return data
@@ -151,7 +147,7 @@ class MultiEnvWrapper(gym.Env):
 
     def reset(
         self, *, seed: int | Sequence[int] | None = None, options: dict | None = None
-    ) -> tuple[Union[np.ndarray, torch.Tensor], dict]:
+    ) -> tuple[np.ndarray | torch.Tensor, dict]:
         """Reset all sub-environments and return batched observation and
         info."""
         # Distribute seeds
@@ -175,7 +171,7 @@ class MultiEnvWrapper(gym.Env):
             # provided as a batch of states for all sub-envs.
             local_options = None
             if options is not None:
-                local_options = dict(options)  # shallow copy
+                local_options = dict(options)
                 if "init_state" in options.keys():
                     assert (
                         isinstance(options["init_state"], (np.ndarray, torch.Tensor))
@@ -184,18 +180,14 @@ class MultiEnvWrapper(gym.Env):
                         "If providing init_state in options, it must be a "
                         "batch of states for all sub-envs"
                     )
-                    local_options = dict(options)  # shallow copy
+                    local_options = dict(options)
                     local_options["init_state"] = self._to_numpy(
                         options["init_state"][i]
                     )
 
             obs, info = env.reset(seed=env_seed, options=local_options)
             # Write obs into buffer
-            if isinstance(self.single_observation_space, gym.spaces.Box):
-                self._observations[i] = obs
-            else:
-                # For Dict/Tuple/etc. spaces, rely on create_empty_array structure
-                self._observations[i] = obs  # type: ignore[assignment]
+            self._observations[i] = obs
 
             # Batch info
             for key, value in info.items():
@@ -224,12 +216,12 @@ class MultiEnvWrapper(gym.Env):
         return self._to_tensor(observations), infos
 
     def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
-        self, actions: Union[np.ndarray, torch.Tensor]
+        self, actions: np.ndarray | torch.Tensor
     ) -> tuple[
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
         dict[str, Any],
     ]:
         """Step all sub-environments with batched actions."""
@@ -243,10 +235,7 @@ class MultiEnvWrapper(gym.Env):
             # Auto-reset paths
             if self._env_needs_reset[i] and self.auto_reset:
                 obs, reset_info = env.reset()
-                if isinstance(self.single_observation_space, gym.spaces.Box):
-                    self._observations[i] = obs
-                else:
-                    self._observations[i] = obs  # type: ignore[assignment]
+                self._observations[i] = obs
                 self._rewards[i] = 0.0
                 self._terminations[i] = False
                 self._truncations[i] = False
@@ -263,10 +252,7 @@ class MultiEnvWrapper(gym.Env):
             action = actions_np[i]
             obs, reward, terminated, truncated, info = env.step(action)
 
-            if isinstance(self.single_observation_space, gym.spaces.Box):
-                self._observations[i] = obs
-            else:
-                self._observations[i] = obs  # type: ignore[assignment]
+            self._observations[i] = obs
             self._rewards[i] = np.float32(reward)
             self._terminations[i] = bool(terminated)
             if self._max_episode_steps is not None:
@@ -310,7 +296,7 @@ class MultiEnvWrapper(gym.Env):
         )
 
     def render(self) -> np.ndarray | None:  # type: ignore
-        """Render all environments and tile them in a 4x4 grid.
+        """Render at most 16 environments and tile them in a 4x4 grid.
 
         Returns:
             Tiled image as numpy array with shape (height, width, 3) or None
@@ -371,7 +357,7 @@ class MultiEnvWrapper(gym.Env):
             if hasattr(env, "close"):
                 env.close()
 
-    # ----------------------- seeding helpers ---------------------
+    # ----------------------- Seeding helpers ---------------------
 
     def seed(self, seeds: int | Sequence[int] | None = None):
         """Seed sub-envs.
@@ -431,15 +417,15 @@ class MultiEnvRecordVideo(RecordVideo):
         ), "MultiEnvRecordVideo only works with MultiEnvWrapper"
 
         super().__init__(env, *args, **kwargs)
-        self.is_vector_env = True  # To avoid checks in RecordVideo
+        self.is_vector_env = True
         self.terminated: bool = False
         self.truncated: bool = False
 
     def step(self, actions) -> tuple[  # type: ignore[override]  # pylint: disable=arguments-renamed
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
-        Union[np.ndarray, torch.Tensor],
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
         dict[str, Any],
     ]:
         """Steps through the environment using actions, recording observations
@@ -454,7 +440,7 @@ class MultiEnvRecordVideo(RecordVideo):
         ) = self.env.step(actions)
 
         if not (self.terminated or self.truncated):
-            # increment steps and episodes
+            # Increment steps and episodes
             self.step_id += 1
 
             if isinstance(truncateds, torch.Tensor):
@@ -483,7 +469,6 @@ class MultiEnvRecordVideo(RecordVideo):
                     if self.recorded_frames > self.video_length:
                         self.close_video_recorder()  # type: ignore
                 else:
-                    # Cast to Any to avoid mypy type issues
                     if isinstance(terminateds, torch.Tensor):
                         term_val = bool(terminateds[0].item())
                     else:
