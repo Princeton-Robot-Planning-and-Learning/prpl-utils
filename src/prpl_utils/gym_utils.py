@@ -254,7 +254,12 @@ class MultiEnvWrapper(gym.Env):
 
             self._observations[i] = obs
             self._rewards[i] = np.float32(reward)
-            self._terminations[i] = bool(terminated)
+            if self._max_episode_steps is None:
+                self._terminations[i] = bool(terminated)
+            else:
+                # NOTE: If max_episode_steps is set, we ignore env-provided
+                # termination signal to avoid inconsistency across sub-envs.
+                self._terminations[i] = False
             if self._max_episode_steps is not None:
                 truncated = self.elapsed_steps[i].item() >= self._max_episode_steps
             self._truncations[i] = bool(truncated)
@@ -386,12 +391,60 @@ class MultiEnvWrapper(gym.Env):
             if hasattr(env.action_space, "seed"):
                 env.action_space.seed(s)
 
-    # -------------------------- misc -----------------------------
-
     @property
     def unwrapped(self):
         """Return the underlying sub-environments list."""
         return self.envs
+
+class NormalizeActionMultiEnvWrapper(MultiEnvWrapper):
+    """A `MultiEnvWrapper` that normalizes the action space to [-1, 1].
+
+    It assumes the action space of the wrapped environment is a Box space.
+    """
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            *args, **kwargs
+        )
+        assert isinstance(
+            self.single_action_space, gym.spaces.Box
+        ), "Only Box action space is supported"
+
+        # Pre-compute normalized action space parameters
+        self.action_low = self.single_action_space.low
+        self.action_high = self.single_action_space.high
+        self._action_mean = (self.action_high + self.action_low) / 2.0
+        self._action_half_range = (self.action_high - self.action_low) / 2.0
+
+        # New normalized action space
+        norm_action_space = gym.spaces.Box(
+            low=-np.ones_like(self.action_low, dtype=np.float32),
+            high=np.ones_like(self.action_high, dtype=np.float32),
+            shape=self.single_action_space.shape,
+            dtype=np.float32,
+        )
+        self.action_space = batch_space(norm_action_space, self.num_envs)
+        self.single_action_space = norm_action_space
+
+    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
+        self, actions: np.ndarray | torch.Tensor
+    ) -> tuple[
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Step all sub-environments with normalized batched actions in [-1, 1]."""
+        actions_np = self._to_numpy(actions)
+        assert self.action_space.contains(actions_np), "Actions not in action space"
+        # Denormalize actions to original space
+        denorm_actions = self._action_mean + actions_np * self._action_half_range
+        return super().step(denorm_actions)
 
 
 class MultiEnvRecordVideo(RecordVideo):
