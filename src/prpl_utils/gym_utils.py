@@ -274,7 +274,11 @@ class MultiEnvWrapper(gym.Env):
             self._truncations[i] = bool(truncated)
 
             # If done, mark for auto-reset next call
-            if terminated or truncated:
+            # NOTE: We ignore env-provided termination and truncation
+            # if max_episode_steps is set, since it may be inconsistent
+            # across sub-envs.
+            if (terminated and self._max_episode_steps is None) \
+                or truncated:
                 self._env_needs_reset[i] = True
 
             for key, value in info.items():
