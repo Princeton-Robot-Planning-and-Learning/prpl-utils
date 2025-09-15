@@ -192,7 +192,7 @@ class MultiEnvWrapper(gym.Env):
             # Batch info
             for key, value in info.items():
                 if key not in infos:
-                    infos[key] = [None] * self.num_envs  # type: ignore
+                    infos[key] = [None] * self.num_envs
                 infos[key][i] = value
 
         # Convert info lists to arrays for scalar values (float/int)
@@ -203,7 +203,7 @@ class MultiEnvWrapper(gym.Env):
                 if v is not None
             ):
                 array = np.array(value_list, dtype=np.float32)
-                infos[key] = self._to_tensor(array)  # type: ignore
+                infos[key] = self._to_tensor(array)
 
         # Reset trackers
         self._env_needs_reset.fill(False)
@@ -244,7 +244,7 @@ class MultiEnvWrapper(gym.Env):
 
                 for key, value in reset_info.items():
                     if key not in infos:
-                        infos[key] = [None] * self.num_envs  # type: ignore
+                        infos[key] = [None] * self.num_envs
                     infos[key][i] = value
                 continue
 
@@ -263,13 +263,12 @@ class MultiEnvWrapper(gym.Env):
             # NOTE: We ignore env-provided termination and truncation
             # if max_episode_steps is set, since it may be inconsistent
             # across sub-envs.
-            if (terminated and self._max_episode_steps is None) \
-                or truncated:
+            if (terminated and self._max_episode_steps is None) or truncated:
                 self._env_needs_reset[i] = True
 
             for key, value in info.items():
                 if key not in infos:
-                    infos[key] = [None] * self.num_envs  # type: ignore
+                    infos[key] = [None] * self.num_envs
                 infos[key][i] = value
 
         # Convert info lists to arrays for scalar values (float/int)
@@ -280,7 +279,7 @@ class MultiEnvWrapper(gym.Env):
                 if v is not None
             ):
                 array = np.array(value_list, dtype=np.float32)
-                infos[key] = self._to_tensor(array)  # type: ignore
+                infos[key] = self._to_tensor(array)
 
         observations = np.array(self._observations)
         rewards = self._rewards.copy()
@@ -303,9 +302,11 @@ class MultiEnvWrapper(gym.Env):
         """
         results: list[np.ndarray] = []
         for env in self.envs:
-            result: np.ndarray | None = env.render()  # type: ignore
-            if result is not None:
-                results.append(result)  # type: ignore
+            rendered_img: np.ndarray | list | None = env.render()
+            assert isinstance(
+                rendered_img, np.ndarray
+            ), "Sub-environment render() must return an image as numpy array"
+            results.append(rendered_img)
 
         if not results:
             return None
@@ -357,36 +358,7 @@ class MultiEnvWrapper(gym.Env):
             if hasattr(env, "close"):
                 env.close()
 
-    # ----------------------- Seeding helpers ---------------------
-
-    def seed(self, seeds: int | Sequence[int] | None = None):
-        """Seed sub-envs.
-
-        Prefer `reset(seed=...)` for Gymnasium compatibility.
-        """
-        if seeds is None:
-            seeds_list: list[int | None] = [None] * self.num_envs
-        elif isinstance(seeds, int):
-            seeds_list = [seeds + i for i in range(self.num_envs)]
-        else:
-            seeds = list(seeds)
-            assert len(seeds) == self.num_envs, (
-                f"Seed sequence length {len(seeds)} doesn't match "
-                f"num_envs {self.num_envs}"
-            )
-            seeds_list = seeds  # type: ignore
-
-        for env, s in zip(self.envs, seeds_list):
-            # Best-effort: Gymnasium prefers `reset(seed=...)`;
-            # some spaces still allow action_space.seed
-            try:
-                env.reset(seed=s)
-            except Exception:
-                pass
-            if hasattr(env.action_space, "seed"):
-                env.action_space.seed(s)
-
-    # -------------------------- misc -----------------------------
+    # -------------------------- Misc -----------------------------
 
     @property
     def unwrapped(self):
@@ -421,7 +393,9 @@ class MultiEnvRecordVideo(RecordVideo):
         self.terminated: bool = False
         self.truncated: bool = False
 
-    def step(self, actions) -> tuple[  # type: ignore[override]  # pylint: disable=arguments-renamed
+    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
+        self, actions: np.ndarray | torch.Tensor
+    ) -> tuple[
         np.ndarray | torch.Tensor,
         np.ndarray | torch.Tensor,
         np.ndarray | torch.Tensor,
@@ -483,4 +457,4 @@ class MultiEnvRecordVideo(RecordVideo):
             elif self._video_enabled():  # type: ignore
                 self.start_video_recorder()  # type: ignore
 
-        return observations, rewards, terminateds, truncateds, infos  # type: ignore
+        return observations, rewards, terminateds, truncateds, infos
