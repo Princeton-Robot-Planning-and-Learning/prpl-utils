@@ -370,10 +370,12 @@ class MultiEnvWrapper(gym.Env):
         """Return the underlying sub-environments list."""
         return self.envs
 
+
 class NormalizeActionMultiEnvWrapper(MultiEnvWrapper):
     """A `MultiEnvWrapper` that normalizes the action space to [-1, 1].
 
-    It assumes the action space of the wrapped environment is a Box space.
+    It assumes the action space of the wrapped environment is a Box
+    space.
     """
 
     def __init__(
@@ -381,9 +383,7 @@ class NormalizeActionMultiEnvWrapper(MultiEnvWrapper):
         *args,
         **kwargs,
     ):
-        super().__init__(
-            *args, **kwargs
-        )
+        super().__init__(*args, **kwargs)
         assert isinstance(
             self.single_action_space, gym.spaces.Box
         ), "Only Box action space is supported"
@@ -413,7 +413,8 @@ class NormalizeActionMultiEnvWrapper(MultiEnvWrapper):
         np.ndarray | torch.Tensor,
         dict[str, Any],
     ]:
-        """Step all sub-environments with normalized batched actions in [-1, 1]."""
+        """Step all sub-environments with normalized batched actions in [-1,
+        1]."""
         actions_np = self._to_numpy(actions)
         assert self.action_space.contains(actions_np), "Actions not in action space"
         # Denormalize actions to original space
