@@ -9,7 +9,6 @@ import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space
-from gymnasium.wrappers import RecordVideo
 
 
 class MultiEnvWrapper(gym.Env):
@@ -70,6 +69,7 @@ class MultiEnvWrapper(gym.Env):
         device: str = "cpu",
         render_mode: str | None = "rgb_array",
     ):
+
         super().__init__()
         self.env_fn = env_fn
         self.num_envs = int(num_envs)
@@ -364,97 +364,3 @@ class MultiEnvWrapper(gym.Env):
     def unwrapped(self):
         """Return the underlying sub-environments list."""
         return self.envs
-
-
-class MultiEnvRecordVideo(RecordVideo):
-    """A `RecordVideo` wrapper for `MultiEnvWrapper` that records tiled
-    rgb_array renders of all sub-environments.
-
-    We need this because the standard `RecordVideo` expects a
-    boolean terminal / truncated signal from the `step()` call, but
-    `MultiEnvWrapper` returns a batch of such signals, one per
-    sub-environment.
-
-    NOTE: This wrapper currently only supports episode based recording.
-    """
-
-    def __init__(
-        self,
-        env: MultiEnvWrapper,
-        *args,
-        **kwargs,
-    ):
-        assert isinstance(
-            env, MultiEnvWrapper
-        ), "MultiEnvRecordVideo only works with MultiEnvWrapper"
-
-        super().__init__(env, *args, **kwargs)
-        self.is_vector_env = True
-        self.terminated: bool = False
-        self.truncated: bool = False
-
-    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
-        self, actions: np.ndarray | torch.Tensor
-    ) -> tuple[
-        np.ndarray | torch.Tensor,
-        np.ndarray | torch.Tensor,
-        np.ndarray | torch.Tensor,
-        np.ndarray | torch.Tensor,
-        dict[str, Any],
-    ]:
-        """Steps through the environment using actions, recording observations
-        if :attr:`self.recording`."""
-        assert isinstance(self.env, MultiEnvWrapper)
-        (
-            observations,
-            rewards,
-            terminateds,
-            truncateds,
-            infos,
-        ) = self.env.step(actions)
-
-        if not (self.terminated or self.truncated):
-            # Increment steps and episodes
-            self.step_id += 1
-
-            if isinstance(truncateds, torch.Tensor):
-                all_truncated = bool(torch.all(truncateds).item())
-            else:
-                all_truncated = bool(np.all(truncateds))
-
-            if all_truncated:
-                # NOTE: We assume all the sub-envs are truncated
-                # at the same time
-                self.episode_id += 1
-                if isinstance(truncateds, torch.Tensor):
-                    self.terminated = bool(truncateds[0].item())
-                else:
-                    self.terminated = bool(truncateds[0])
-                if isinstance(truncateds, torch.Tensor):
-                    self.truncated = bool(truncateds[0].item())
-                else:
-                    self.truncated = bool(truncateds[0])
-
-            if self.recording:
-                assert self.video_recorder is not None
-                self.video_recorder.capture_frame()  # type: ignore
-                self.recorded_frames += 1
-                if self.video_length > 0:
-                    if self.recorded_frames > self.video_length:
-                        self.close_video_recorder()  # type: ignore
-                else:
-                    if isinstance(terminateds, torch.Tensor):
-                        term_val = bool(terminateds[0].item())
-                    else:
-                        term_val = bool(terminateds[0])
-                    if isinstance(truncateds, torch.Tensor):
-                        trunc_val = bool(truncateds[0].item())
-                    else:
-                        trunc_val = bool(truncateds[0])
-                    if term_val or trunc_val:
-                        self.close_video_recorder()  # type: ignore
-
-            elif self._video_enabled():  # type: ignore
-                self.start_video_recorder()  # type: ignore
-
-        return observations, rewards, terminateds, truncateds, infos
