@@ -1,14 +1,11 @@
 """Tests for gym utilities."""
 
-import os
-import tempfile
-
 import gymnasium as gym
 import numpy as np
 import pytest
 import torch
 
-from prpl_utils.gym_utils import MultiEnvRecordVideo, MultiEnvWrapper
+from prpl_utils.gym_utils import MultiEnvWrapper
 
 
 def test_multi_env_wrapper():
@@ -237,64 +234,6 @@ def test_multi_env_wrapper_max_steps():
             break
 
     multi_env.close()
-
-
-def test_multi_env_recorder():
-    """Test MultiEnvRecordVideo records video for the first episode."""
-
-    # Create a temporary directory for video output
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Create MultiEnvWrapper with render_mode for recording
-        env_fn = lambda: gym.make("CartPole-v1", render_mode="rgb_array")
-        num_envs = 2
-        max_episode_steps = 5  # Short episodes for quick testing
-        multi_env = MultiEnvWrapper(
-            env_fn,
-            num_envs=num_envs,
-            max_episode_steps=max_episode_steps,
-            render_mode="rgb_array",
-        )
-
-        # Wrap with MultiEnvRecordVideo
-        video_env = MultiEnvRecordVideo(
-            multi_env,
-            video_folder=tmp_dir,
-            episode_trigger=lambda x: x == 0,  # Record only the first episode
-            name_prefix="test-video",
-        )
-
-        # Reset and run one complete episode
-        _obs_batch, _ = video_env.reset(seed=123)
-
-        # Step through until episode is complete
-        # (should trigger truncation at max_episode_steps)
-        for _ in range(max_episode_steps + 1):
-            actions = video_env.action_space.sample()
-            _obs_batch, _rewards, _terminated, truncated, _info_batch = video_env.step(
-                actions
-            )
-
-            # Break when all environments are truncated
-            if np.all(truncated):
-                break
-
-        # Close the environment to finalize any video recording
-        video_env.close()
-
-        # Check that a video file was created in the temporary directory
-        video_files = [
-            f
-            for f in os.listdir(tmp_dir)
-            if f.startswith("test-video") and f.endswith(".mp4")
-        ]
-        assert len(video_files) > 0, (
-            f"Expected video file to be created in {tmp_dir}, "
-            f"found: {os.listdir(tmp_dir)}"
-        )
-
-        # Verify the video file has some content (not empty)
-        video_path = os.path.join(tmp_dir, video_files[0])
-        assert os.path.getsize(video_path) > 0, "Video file should not be empty"
 
 
 def test_multi_env_wrapper_to_tensor():

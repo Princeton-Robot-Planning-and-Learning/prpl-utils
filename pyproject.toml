@@ -13,7 +13,7 @@ dependencies = [
    "numpy",
    "graphviz",
    "pyperplan",
-   "gymnasium[classic-control]==0.29.1",
+   "gymnasium[classic-control]>=0.29.1",
    "moviepy",
    "torch"
 ]
