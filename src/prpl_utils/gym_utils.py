@@ -9,7 +9,6 @@ import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space
-from gymnasium.wrappers import RecordVideo
 
 
 class MultiEnvWrapper(gym.Env):
@@ -70,6 +69,7 @@ class MultiEnvWrapper(gym.Env):
         device: str = "cpu",
         render_mode: str | None = "rgb_array",
     ):
+
         super().__init__()
         self.env_fn = env_fn
         self.num_envs = int(num_envs)
