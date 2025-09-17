@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space
+from gymnasium.wrappers import RecordVideo
 
 
 class MultiEnvWrapper(gym.Env):
@@ -254,7 +255,12 @@ class MultiEnvWrapper(gym.Env):
 
             self._observations[i] = obs
             self._rewards[i] = np.float32(reward)
-            self._terminations[i] = bool(terminated)
+            if self._max_episode_steps is None:
+                self._terminations[i] = bool(terminated)
+            else:
+                # NOTE: If max_episode_steps is set, we ignore env-provided
+                # termination signal to avoid inconsistency across sub-envs.
+                self._terminations[i] = False
             if self._max_episode_steps is not None:
                 truncated = self.elapsed_steps[i].item() >= self._max_episode_steps
             self._truncations[i] = bool(truncated)
@@ -364,3 +370,148 @@ class MultiEnvWrapper(gym.Env):
     def unwrapped(self):
         """Return the underlying sub-environments list."""
         return self.envs
+
+
+class NormalizeActionMultiEnvWrapper(MultiEnvWrapper):
+    """A `MultiEnvWrapper` that normalizes the action space to [-1, 1].
+
+    It assumes the action space of the wrapped environment is a Box
+    space.
+    """
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        assert isinstance(
+            self.single_action_space, gym.spaces.Box
+        ), "Only Box action space is supported"
+
+        # Pre-compute normalized action space parameters
+        self.action_low = self.single_action_space.low
+        self.action_high = self.single_action_space.high
+        self._action_mean = (self.action_high + self.action_low) / 2.0
+        self._action_half_range = (self.action_high - self.action_low) / 2.0
+
+        # New normalized action space
+        norm_action_space = gym.spaces.Box(
+            low=-np.ones_like(self.action_low, dtype=np.float32),
+            high=np.ones_like(self.action_high, dtype=np.float32),
+            shape=self.single_action_space.shape,
+            dtype=np.float32,
+        )
+        self.action_space = batch_space(norm_action_space, self.num_envs)
+        self.single_action_space = norm_action_space
+
+    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
+        self, actions: np.ndarray | torch.Tensor
+    ) -> tuple[
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Step all sub-environments with normalized batched actions in [-1,
+        1]."""
+        actions_np = self._to_numpy(actions)
+        assert self.action_space.contains(actions_np), "Actions not in action space"
+        # Denormalize actions to original space
+        denorm_actions = self._action_mean + actions_np * self._action_half_range
+        return super().step(denorm_actions)
+
+
+class MultiEnvRecordVideo(RecordVideo):
+    """A `RecordVideo` wrapper for `MultiEnvWrapper` that records tiled
+    rgb_array renders of all sub-environments.
+
+    We need this because the standard `RecordVideo` expects a
+    boolean terminal / truncated signal from the `step()` call, but
+    `MultiEnvWrapper` returns a batch of such signals, one per
+    sub-environment.
+
+    NOTE: This wrapper currently only supports episode based recording.
+    """
+
+    def __init__(
+        self,
+        env: MultiEnvWrapper,
+        *args,
+        **kwargs,
+    ):
+        assert isinstance(
+            env, MultiEnvWrapper
+        ), "MultiEnvRecordVideo only works with MultiEnvWrapper"
+
+        super().__init__(env, *args, **kwargs)
+        self.is_vector_env = True
+        self.terminated: bool = False
+        self.truncated: bool = False
+
+    def step(  # type: ignore[override]  # pylint: disable=arguments-renamed
+        self, actions: np.ndarray | torch.Tensor
+    ) -> tuple[
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        np.ndarray | torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Steps through the environment using actions, recording observations
+        if :attr:`self.recording`."""
+        assert isinstance(self.env, MultiEnvWrapper)
+        (
+            observations,
+            rewards,
+            terminateds,
+            truncateds,
+            infos,
+        ) = self.env.step(actions)
+
+        if not (self.terminated or self.truncated):
+            # Increment steps and episodes
+            self.step_id += 1
+
+            if isinstance(truncateds, torch.Tensor):
+                all_truncated = bool(torch.all(truncateds).item())
+            else:
+                all_truncated = bool(np.all(truncateds))
+
+            if all_truncated:
+                # NOTE: We assume all the sub-envs are truncated
+                # at the same time
+                self.episode_id += 1
+                if isinstance(truncateds, torch.Tensor):
+                    self.terminated = bool(truncateds[0].item())
+                else:
+                    self.terminated = bool(truncateds[0])
+                if isinstance(truncateds, torch.Tensor):
+                    self.truncated = bool(truncateds[0].item())
+                else:
+                    self.truncated = bool(truncateds[0])
+
+            if self.recording:
+                assert self.video_recorder is not None
+                self.video_recorder.capture_frame()  # type: ignore
+                self.recorded_frames += 1
+                if self.video_length > 0:
+                    if self.recorded_frames > self.video_length:
+                        self.close_video_recorder()  # type: ignore
+                else:
+                    if isinstance(terminateds, torch.Tensor):
+                        term_val = bool(terminateds[0].item())
+                    else:
+                        term_val = bool(terminateds[0])
+                    if isinstance(truncateds, torch.Tensor):
+                        trunc_val = bool(truncateds[0].item())
+                    else:
+                        trunc_val = bool(truncateds[0])
+                    if term_val or trunc_val:
+                        self.close_video_recorder()  # type: ignore
+
+            elif self._video_enabled():  # type: ignore
+                self.start_video_recorder()  # type: ignore
+
+        return observations, rewards, terminateds, truncateds, infos
