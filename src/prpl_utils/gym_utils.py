@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium.vector.utils import batch_space
+from gymnasium.wrappers import RecordVideo
 
 
 class MultiEnvWrapper(gym.Env):
