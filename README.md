@@ -2,6 +2,8 @@
 
 ![workflow](https://github.com/Princeton-Robot-Planning-and-Learning/prpl-utils/actions/workflows/ci.yml/badge.svg)
 
+⚠️ This code has been moved: https://github.com/Princeton-Robot-Planning-and-Learning/prpl-mono ⚠️
+
 Miscellaneous Python utilities from the Princeton Robot Planning and Learning group.
 - **Motion planning**: RRT, BiRRT
 - **PDDL planning**: interfaces to pyperplan, Fast Downward
